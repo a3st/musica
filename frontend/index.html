@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#121820" />
+    <meta name="description" content="Musica — музыкальный плеер на собственном сервере" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <title>Musica</title>
+  </head>
+  <body>
+    <main>
+      <img src="/icon.svg" alt="" width="72" height="72" />
+      <h1>Musica</h1>
+      <p>Ваша музыка. Ваш сервер.</p>
+      <section aria-labelledby="library-title">
+        <h2 id="library-title">Медиатека</h2>
+        <p>Здесь появятся ваши альбомы и треки.</p>
+      </section>
+      <p id="api-status" role="status">Проверяем подключение к серверу…</p>
+      <button id="retry" type="button">Проверить подключение</button>
+      <button id="update" type="button" hidden>Обновить приложение</button>
+      <p id="pwa-status" role="status"></p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

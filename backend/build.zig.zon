@@ -1,0 +1,17 @@
+.{
+    .name = .musica_backend,
+    .fingerprint = 0xda4d6f6af967fbc5,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .httpz = .{
+            .url = "git+https://github.com/karlseguin/http.zig#9b14af98fde5e98abb9a8376fe02b42003e835bf",
+            .hash = "httpz-0.0.0-PNVzrMgTCQDhzfBLRRebTx9LU056Ph2erdN9-42rFbhj",
+        },
+        .pg = .{
+            .url = "git+https://github.com/karlseguin/pg.zig#2e08f9817aacff1ad93531ec182ee9cc69f5bda5",
+            .hash = "pg-0.0.0-Wp_7gTEVBwB8CsFe-rh8enfPHKrfA3oapKLIRoPbKUDx",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "migrations" },
+}

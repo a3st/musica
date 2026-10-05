@@ -1,0 +1,82 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: build",
+      "type": "shell",
+      "command": "zig",
+      "args": ["build"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Backend: build ReleaseSafe",
+      "type": "shell",
+      "command": "zig",
+      "args": ["build", "-Doptimize=ReleaseSafe"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Backend: run",
+      "type": "shell",
+      "command": "zig",
+      "args": ["build", "run"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 },
+      "presentation": { "panel": "dedicated", "group": "musica-dev", "reveal": "always" }
+    },
+    {
+      "label": "Frontend: install",
+      "type": "shell",
+      "command": "npm",
+      "windows": { "command": "npm.cmd" },
+      "args": ["ci"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated" }
+    },
+    {
+      "label": "Frontend: build",
+      "type": "shell",
+      "command": "npm",
+      "windows": { "command": "npm.cmd" },
+      "args": ["run", "build"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "problemMatcher": "$tsc",
+      "presentation": { "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Frontend: run",
+      "type": "shell",
+      "command": "npm",
+      "windows": { "command": "npm.cmd" },
+      "args": ["run", "dev"],
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 },
+      "presentation": { "panel": "dedicated", "group": "musica-dev", "reveal": "always" }
+    },
+    {
+      "label": "Build: all",
+      "dependsOn": ["Backend: build", "Frontend: build"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: all",
+      "dependsOn": ["Backend: run", "Frontend: run"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    }
+  ]
+}
