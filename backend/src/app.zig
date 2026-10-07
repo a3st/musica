@@ -8,6 +8,9 @@ pub const App = struct {
     db: *pg.Pool,
     storage: S3,
     max_upload_bytes: usize,
+    ffmpeg_path: []const u8 = "ffmpeg",
+    hls_tmp_dir: []const u8 = "/tmp/musica-hls",
+    hls_timeout_seconds: u32 = 900,
 
     pub fn notFound(_: *App, _: *httpz.Request, res: *httpz.Response) !void {
         try api.failure(res, error.NotFound);

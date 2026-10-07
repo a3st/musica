@@ -28,7 +28,7 @@ RUN zig build test && zig build -Doptimize=ReleaseSafe
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

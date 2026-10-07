@@ -13,6 +13,10 @@ pub const Config = struct {
     s3_access_key: []const u8,
     s3_secret_key: []const u8,
     max_upload_bytes: usize,
+    ffmpeg_path: []const u8,
+    hls_tmp_dir: []const u8,
+    hls_worker_enabled: bool,
+    hls_timeout_seconds: u32,
 
     pub fn load(env: *const std.process.Environ.Map) !Config {
         const config: Config = .{
@@ -28,10 +32,16 @@ pub const Config = struct {
             .s3_access_key = try required(env, "S3_ACCESS_KEY_ID"),
             .s3_secret_key = try required(env, "S3_SECRET_ACCESS_KEY"),
             .max_upload_bytes = try std.fmt.parseInt(usize, env.get("MAX_UPLOAD_BYTES") orelse "67108864", 10),
+            .ffmpeg_path = env.get("FFMPEG_PATH") orelse "ffmpeg",
+            .hls_tmp_dir = env.get("HLS_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-hls",
+            .hls_worker_enabled = try boolean(env.get("HLS_WORKER_ENABLED") orelse "true"),
+            .hls_timeout_seconds = try std.fmt.parseInt(u32, env.get("HLS_TIMEOUT_SECONDS") orelse "900", 10),
         };
         if (config.pg_port == 0 or config.max_upload_bytes == 0 or config.max_upload_bytes > 512 * 1024 * 1024)
             return error.InvalidConfiguration;
         if (config.pg_host.len == 0 or config.pg_user.len == 0 or config.pg_database.len == 0)
+            return error.InvalidConfiguration;
+        if (config.ffmpeg_path.len == 0 or config.hls_tmp_dir.len == 0 or config.hls_timeout_seconds == 0 or config.hls_timeout_seconds > 3600)
             return error.InvalidConfiguration;
         try validateEndpoint(config.s3_endpoint);
         if (config.s3_bucket.len < 3 or config.s3_bucket.len > 63 or
@@ -53,6 +63,12 @@ pub const Config = struct {
         return config;
     }
 };
+
+fn boolean(value: []const u8) !bool {
+    if (std.mem.eql(u8, value, "true")) return true;
+    if (std.mem.eql(u8, value, "false")) return false;
+    return error.InvalidConfiguration;
+}
 
 fn httpAddress(env: *const std.process.Environ.Map) !std.Io.net.IpAddress {
     const port = try std.fmt.parseInt(u16, env.get("HTTP_PORT") orelse "8080", 10);

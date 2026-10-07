@@ -1,7 +1,7 @@
 # Backend Musica
 
 Zig **0.16.0**, HTTP-сервер `httpz`, PostgreSQL через `pg.zig`, MinIO через
-S3 PutObject с подписью AWS Signature V4. Обе Zig-зависимости закреплены
+S3 PutObject/GetObject с подписью AWS Signature V4, HLS через FFmpeg. Обе Zig-зависимости закреплены
 на конкретных коммитах для Zig 0.16.
 
 ## Архитектура
@@ -19,6 +19,7 @@ src/
     s3.zig                    S3-клиент для MinIO
   features/
     playlists/                Пользовательские плейлисты, доступ и обложки
+    streaming/                HLS: маршруты, очередь PostgreSQL и фоновый воркер
     health/routes.zig         Проверка доступности процесса
     tracks/
       routes.zig              HTTP-контракт
@@ -73,6 +74,8 @@ docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /mig
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f /migrations/005_pending_track_storage.sql
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/006_albums_to_playlists.sql
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/007_remove_playlist_artist.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/008_track_status_enum.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/009_track_hls.sql
 ```
 
 Создайте бакет вручную через MinIO client внутри контейнера:
@@ -116,7 +119,8 @@ backend запускается с UID/GID `10001`. Архив Zig проверя
 
 Нужны PostgreSQL 14+ и MinIO с доступным S3 API. Создайте БД `musica`,
 пользователя с правами на неё и приватный бакет **`uploads`** в MinIO.
-`uploads` — имя бакета без ведущего `/`, объекты размещаются под `tracks/<uuid>`.
+`uploads` — имя бакета без ведущего `/`, оригиналы новых треков размещаются
+по ключу `tracks/<uuid>/source`, HLS — под `tracks/<uuid>/hls/<attempt-id>/`.
 Backend не создаёт бакет и не применяет миграции при запуске.
 
 Переменные описаны в [`.env.example`](.env.example). Файлы `.env` автоматически
@@ -176,6 +180,8 @@ psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/0
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f migrations/005_pending_track_storage.sql
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/006_albums_to_playlists.sql
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/007_remove_playlist_artist.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/008_track_status_enum.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/009_track_hls.sql
 ```
 
 В командах указаны стандартные параметры: замените их при необходимости.
@@ -197,12 +203,22 @@ psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/0
 `006_albums_to_playlists.sql` переименовывает `albums` в `playlists`,
 `track_albums` в `track_playlists`, `album_members` в `playlist_members`
 и поля связей `album_id` в `playlist_id`, обновляет триггер дефолтной коллекции.
-Исторические миграции `001`–`005` не изменены. Если они уже применены,
-выполните только `006` перед запуском новой версии backend.
+Исторические миграции не изменены. Выполните все ещё не применённые миграции
+перед запуском новой версии backend.
 ID, связи, настройки доступа, роли, токены ссылок и ключи обложек сохраняются.
 `007_remove_playlist_artist.sql` удаляет старое поле `playlists.artist`
 вместе с его ограничением. У плейлиста нет исполнителя; `tracks.artist`
 сохраняется. Значения удаляемого поля не переносятся.
+
+`008_track_status_enum.sql` меняет тип `tracks.status` с `text` на PostgreSQL
+enum `track_status`. В Zig используется `TrackStatus`. Значения и JSON API
+сохраняются: `pending` — ожидается исходный файл, `ready` — исходный файл
+загружен. Метаданные и пути существующих треков сохраняются. Миграция берёт
+эксклюзивную блокировку `tracks`; выполняйте её в окно обслуживания.
+
+`009_track_hls.sql` добавляет `streamed`, поля готового HLS и очередь
+`track_hls_jobs`. Исходные файлы и статусы старых треков сохраняются.
+Сначала примените миграции, затем запустите новую версию backend.
 
 API переименован: `/api/albums` → `/api/playlists`,
 `/api/shared/albums/:token` → `/api/shared/playlists/:token`,
@@ -342,7 +358,7 @@ COMMIT;
 
 Трек и все связи с плейлистами создаются в одной транзакции, без файла.
 При создании записываются `storage_bucket` из текущего `S3_BUCKET` и
-`object_key = tracks/<uuid>`. Статус остаётся `pending`, а `content_type`,
+`object_key = tracks/<uuid>/source`. Статус остаётся `pending`, а `content_type`,
 `size_bytes` и `uploaded_at` — `NULL` до успешной загрузки. Наличие пути
 не означает, что объект уже существует в S3.
 Если хотя бы один плейлист не найден, ни трек, ни связи не сохраняются.
@@ -378,7 +394,7 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
   "id": "UUID-трека",
   "status": "ready",
   "bucket": "uploads",
-  "object_key": "tracks/UUID-трека",
+  "object_key": "tracks/UUID-трека/source",
   "size_bytes": 123456,
   "content_type": "audio/mpeg"
 }
@@ -411,7 +427,7 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
 
 Загрузка держит `SELECT ... FOR UPDATE NOWAIT` до завершения S3 и коммита БД.
 После ошибки S3 транзакция откатывается, трек остаётся `pending`: PUT можно
-повторить. Для `ready` повторная загрузка запрещена.
+повторить. Для `ready` и `streamed` повторная загрузка запрещена.
 Загрузка использует сохранённые в БД бакет и ключ; смена `S3_BUCKET` влияет
 только на новые треки. В ответе PUT возвращается фактически использованный
 бакет, даже если он отличается от текущей конфигурации. Backend должен иметь
@@ -419,13 +435,102 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
 Сохранённый путь также позволит удалять оставшиеся объекты при очистке
 заброшенных `pending`-треков; сама задача очистки пока не реализована.
 
+Схема `tracks/<id>/source` используется для новых записей. У ранее созданных
+треков сохранённый `object_key` не меняется: PUT и HLS читают путь из БД.
+Существующие объекты автоматически не перемещаются, миграция SQL не требуется.
+Для переноса старого оригинала сначала нужно скопировать объект в новый ключ,
+проверить копию и согласованно обновить `tracks.object_key`; одно изменение БД
+без копирования файла нарушит доступ к оригиналу.
+
 PostgreSQL и S3 не образуют общую транзакцию. При успешном S3 PUT и ошибке
 обновления/коммита БД объект может остаться в бакете. Повторный PUT для
 `pending` использует тот же ключ и заменяет такой объект. При потере ответа
 коммита запись может уже стать `ready`; повторный PUT тогда вернёт `409`.
 
 `GET /api/health` сохраняет прежний контракт и проверяет доступность процесса,
-а не текущую готовность PostgreSQL или MinIO. Скачивание аудио пока не реализовано.
+а не текущую готовность PostgreSQL или MinIO. Для воспроизведения доступны HLS-ручки ниже.
+
+## HLS и несколько нод
+
+Состояние трека: `pending` → `ready` → `streamed`. `ready` означает, что
+загружен оригинал; `streamed` выставляется только после сохранения всех HLS
+объектов. Состояние задачи хранится отдельно: `queued / processing / ready / failed`.
+Оригинал сохраняется для повторной подготовки и не перезаписывается.
+
+| Метод и путь | Поведение |
+| --- | --- |
+| `POST /api/tracks/:id/hls` | Владелец запускает подготовку: `202` со статусом задачи; для уже готового трека `200` |
+| `GET /api/tracks/:id/hls/status` | `200`, например `{"status":"ready","preparation":"processing"}` |
+| `GET /api/tracks/:id/hls/index.m3u8` | VOD-манифест, `application/vnd.apple.mpegurl` |
+| `GET /api/tracks/:id/hls/segments/segment-000000.ts` | Готовый сегмент, `video/mp2t` |
+
+POST не требует JSON-тела. Повторный POST для queued/processing идемпотентен,
+для failed ставит задачу заново. Для pending возвращается `409 track_not_uploaded`.
+До готовности GET манифеста/сегмента возвращает `409 hls_not_ready`.
+Состояние не начатой задачи — `preparation: null`. Номер отсутствующего
+сегмента возвращает `404`. При ошибке подготовки трек остаётся `ready`,
+задача становится `failed`, подробности записываются только в лог.
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8080/api/tracks/$track/hls" -H "Authorization: Bearer $token"
+curl.exe "http://127.0.0.1:8080/api/tracks/$track/hls/status" -H "Authorization: Bearer $token"
+curl.exe "http://127.0.0.1:8080/api/tracks/$track/hls/index.m3u8" -H "Authorization: Bearer $token"
+```
+
+Каждый GET проверяет доступ: владелец трека, участник связанного плейлиста,
+публичный плейлист или действующая ссылка unlisted-плейлиста. Для приватного
+воспроизведения HLS-клиент должен передавать Bearer в запросах манифеста
+и всех сегментов. Для доступа по ссылке передайте `?share_token=<token>`
+к манифесту; backend добавит этот параметр в относительные URL сегментов.
+Отзыв ссылки/участника действует и для последующих запросов сегментов.
+Все ответы имеют `Cache-Control: no-store`; произвольные S3-пути не принимаются.
+
+В каждом процессе по умолчанию работает один фоновый воркер. Он скачивает
+оригинал, запускает FFmpeg: AAC 192 kbit/s, stereo, 48 kHz, MPEG-TS, сегменты
+около 6 секунд и VOD-манифест. Исходный MP3 и другие поддерживаемые аудиоформаты
+определяются FFmpeg; невалидный файл приводит к failed. FFmpeg запускается
+без shell, с ограничением протоколов и демультиплексоров. Docker-образ включает
+FFmpeg; для локального запуска установите его и добавьте в PATH или задайте путь.
+
+Для Windows укажите путь к файлу, например
+`FFMPEG_PATH=C:/Program Files/FFmpeg/bin/ffmpeg.exe`, а не каталог `bin`.
+Debug-конфигурация VS Code читает `backend/.env`; после изменения перезапустите
+отладку. Отсутствующий executable даёт `FfmpegNotFound` с путём в логе,
+задача становится failed без автоматических повторов. После исправления
+конфигурации повторите POST подготовки.
+
+| Окружение | По умолчанию | Назначение |
+| --- | --- | --- |
+| `FFMPEG_PATH` | `ffmpeg` | Исполняемый файл FFmpeg |
+| `HLS_WORKER_ENABLED` | `true` | `false` отключает воркер, сохраняя HTTP-ручки |
+| `HLS_TIMEOUT_SECONDS` | `900` | Дедлайн всей подготовки, максимум 3600 секунд |
+| `HLS_TMP_DIR` | Windows: `TEMP`; иначе `/tmp/musica-hls` | Доступный для записи временный каталог |
+
+Воркеры забирают задачи через короткий `FOR UPDATE SKIP LOCKED`, получают
+60-секундную аренду и токен попытки, продлевают аренду каждые 10 секунд.
+После падения ноды задача доступна другой ноде по истечении аренды.
+Конвертация и S3 не удерживают транзакцию БД. Сегменты, затем манифест
+загружаются в сохранённый бакет исходника по префиксу
+`tracks/<id>/hls/<attempt-id>/`. Транзакция публикации проверяет актуальный
+токен и аренду, одновременно выставляет `streamed` и фиксирует этот префикс.
+Опоздавшая попытка не может изменить результат новой.
+
+Ошибки конвертации и дедлайн требуют повторного POST; временные ошибки
+хранилища повторяются автоматически до трёх попыток с задержкой 30 секунд.
+Сбой процесса восстанавливается по аренде, а не по счётчику попыток.
+Лимиты: 10000 сегментов, сегмент до 2 MiB, манифест до 1 MiB; оригинал
+ограничен `MAX_UPLOAD_BYTES`. Оригинал и ответы GET читаются с ограничением
+в память; загрузка сегментов выполняется последовательно.
+
+Сессии и задачи находятся в PostgreSQL, файлы — в MinIO: любую HTTP-ноду
+можно использовать для воспроизведения, sticky sessions не нужны.
+Локальный каталог попытки удаляется после завершения/отмены; после аварийного
+завершения процесса он может остаться. Незавершённые S3-префиксы не публикуются,
+но их автоматическая очистка пока не реализована. Все ноды должны использовать
+одни PostgreSQL/MinIO и иметь доступ к историческим бакетам.
+
+Реализация использует [HLS muxer FFmpeg](https://ffmpeg.org/ffmpeg-formats.html#hls)
+и [блокировки PostgreSQL](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE).
 
 ## Отладка в VS Code на Windows
 
@@ -484,6 +589,10 @@ zig build -Doptimize=ReleaseSafe
 ```sh
 python backend/tests/api_integration.py
 python backend/tests/api_integration.py --optimize ReleaseSafe
+
+# Реальный FFmpeg и несколько нод (образ собирается в ReleaseSafe):
+docker build -t musica-backend:hls-test backend
+python backend/tests/api_integration.py --optimize ReleaseSafe --backend-image musica-backend:hls-test
 ```
 
 Нужны Python 3, работающий Docker Compose и Zig 0.16. Скрипт создаёт отдельный
@@ -495,6 +604,14 @@ python backend/tests/api_integration.py --optimize ReleaseSafe
 Проверяются также ответы и логи при сбоях БД и S3: диагностические в Debug,
 без указания инфраструктуры в Release.
 
+С `--backend-image` скрипт дополнительно генерирует настоящий MP3, проверяет
+AAC-сегменты через ffprobe, работу двух воркеров и отдельной HTTP-ноды,
+восстановление истёкшей аренды и отказ публикации старой попытки, права
+на сегменты, отзыв ссылки, ошибку конвертации и повторный запуск.
+Выбирайте `--optimize`, соответствующий режиму сборки образа. SigV4 PUT и GET
+проверяются тестовым S3-сервером независимо через Python hashlib/hmac.
+
 Протокол S3 опирается на [PutObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html)
+и [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 и [AWS Signature V4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html).
 Драйвер PostgreSQL: [pg.zig](https://github.com/karlseguin/pg.zig).

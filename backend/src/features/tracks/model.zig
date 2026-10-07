@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const TrackStatus = enum { pending, ready, streamed };
+
 pub const CreateTrack = struct {
     playlist_ids: []const []const u8 = &.{},
     title: []const u8,

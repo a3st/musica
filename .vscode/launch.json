@@ -6,7 +6,7 @@
       "type": "cppvsdbg",
       "request": "launch",
       "program": "${workspaceFolder}/backend/zig-out/debug/bin/musica-backend.exe",
-      "cwd": "${workspaceFolder}/backend",
+      "cwd": "${workspaceFolder}/backend/zig-out/debug/bin",
       "args": [],
       "envFile": "${workspaceFolder}/backend/.env",
       "preLaunchTask": "Backend: build Debug",

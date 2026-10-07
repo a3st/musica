@@ -18,7 +18,7 @@ fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const id = service.create(app, res.arena, user, input) catch |err| return api.failure(res, err);
     res.status = 201;
     res.header("Cache-Control", "no-store");
-    try res.json(.{ .id = &id, .status = "pending" }, .{});
+    try res.json(.{ .id = &id, .status = model.TrackStatus.pending }, .{});
 }
 
 fn upload(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
@@ -37,7 +37,7 @@ fn upload(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     res.header("Cache-Control", "no-store");
     try res.json(.{
         .id = try std.ascii.allocLowerString(res.arena, id),
-        .status = "ready",
+        .status = model.TrackStatus.ready,
         .bucket = location.bucket,
         .object_key = location.key,
         .size_bytes = data.len,

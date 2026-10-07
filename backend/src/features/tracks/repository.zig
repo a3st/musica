@@ -12,7 +12,7 @@ pub fn create(pool: *pg.Pool, arena: std.mem.Allocator, user: []const u8, bucket
     const id = (try sql.text(
         conn,
         arena,
-        "WITH new_track AS (SELECT gen_random_uuid() AS id) INSERT INTO tracks (id, title, artist, owner_id, storage_bucket, object_key) SELECT id, $1, $2, $3, $4, 'tracks/' || id::text FROM new_track RETURNING id::text",
+        "WITH new_track AS (SELECT gen_random_uuid() AS id) INSERT INTO tracks (id, title, artist, owner_id, storage_bucket, object_key) SELECT id, $1, $2, $3, $4, 'tracks/' || id::text || '/source' FROM new_track RETURNING id::text",
         .{ input.title, input.artist, user, bucket },
     )) orelse return error.DatabaseUnavailable;
     if (!model.validId(id)) return error.DatabaseUnavailable;
@@ -56,8 +56,8 @@ pub const Upload = struct {
             if (err == error.LockUnavailable) return error.UploadInProgress;
             return err;
         }) orelse return error.TrackNotFound;
-        const state = std.json.parseFromSliceLeaky(struct { status: []const u8, bucket: []const u8, key: []const u8 }, arena, state_json, .{}) catch return error.DatabaseUnavailable;
-        if (!std.mem.eql(u8, state.status, "pending")) return error.AlreadyUploaded;
+        const state = std.json.parseFromSliceLeaky(struct { status: model.TrackStatus, bucket: []const u8, key: []const u8 }, arena, state_json, .{}) catch return error.DatabaseUnavailable;
+        if (state.status != .pending) return error.AlreadyUploaded;
         return .{ .conn = conn, .bucket = state.bucket, .key = state.key };
     }
 
