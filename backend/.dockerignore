@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!build.zig
+!build.zig.zon
+!src/
+!src/**
+!migrations/
+!migrations/**

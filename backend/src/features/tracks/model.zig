@@ -1,15 +1,21 @@
 const std = @import("std");
 
 pub const CreateTrack = struct {
-    album_id: []const u8,
+    playlist_ids: []const []const u8 = &.{},
     title: []const u8,
     artist: []const u8,
 };
 
 pub fn validateCreate(input: CreateTrack) !CreateTrack {
-    if (!validId(input.album_id)) return error.InvalidAlbumId;
+    if (input.playlist_ids.len > 100) return error.InvalidPlaylistIds;
+    for (input.playlist_ids, 0..) |id, i| {
+        if (!validId(id)) return error.InvalidPlaylistId;
+        for (input.playlist_ids[0..i]) |previous| {
+            if (std.ascii.eqlIgnoreCase(id, previous)) return error.DuplicatePlaylistId;
+        }
+    }
     return .{
-        .album_id = input.album_id,
+        .playlist_ids = input.playlist_ids,
         .title = try validateText(input.title),
         .artist = try validateText(input.artist),
     };
@@ -52,12 +58,12 @@ pub fn contentType(header: []const u8) ?[]const u8 {
 
 test "validate track metadata including Cyrillic and missing text" {
     const id = "11111111-1111-4111-8111-111111111111";
-    const input = try validateCreate(.{ .album_id = id, .title = "  Песня  ", .artist = "Исполнитель" });
+    const input = try validateCreate(.{ .playlist_ids = &.{id}, .title = "  Песня  ", .artist = "Исполнитель" });
     try std.testing.expectEqualStrings("Песня", input.title);
-    try std.testing.expectError(error.InvalidText, validateCreate(.{ .album_id = id, .title = " \t", .artist = "Artist" }));
-    try std.testing.expectError(error.InvalidText, validateCreate(.{ .album_id = id, .title = "bad\x00title", .artist = "Artist" }));
-    try std.testing.expectError(error.InvalidText, validateCreate(.{ .album_id = id, .title = "\xff", .artist = "Artist" }));
-    try std.testing.expectError(error.InvalidText, validateCreate(.{ .album_id = id, .title = "a" ** 257, .artist = "Artist" }));
+    try std.testing.expectError(error.InvalidText, validateCreate(.{ .playlist_ids = &.{id}, .title = " \t", .artist = "Artist" }));
+    try std.testing.expectError(error.InvalidText, validateCreate(.{ .playlist_ids = &.{id}, .title = "bad\x00title", .artist = "Artist" }));
+    try std.testing.expectError(error.InvalidText, validateCreate(.{ .playlist_ids = &.{id}, .title = "\xff", .artist = "Artist" }));
+    try std.testing.expectError(error.InvalidText, validateCreate(.{ .playlist_ids = &.{id}, .title = "a" ** 257, .artist = "Artist" }));
 }
 
 test "IDs cannot inject object paths or SQL" {
@@ -71,4 +77,29 @@ test "normalize allowed MIME types and reject multipart" {
     try std.testing.expectEqualStrings("audio/mpeg", contentType("Audio/MPEG; charset=binary").?);
     try std.testing.expect(contentType("multipart/form-data; boundary=test") == null);
     try std.testing.expect(contentType("text/html") == null);
+}
+
+test "playlist memberships require distinct valid UUIDs and a bounded list" {
+    const id = "abcdef01-1234-5678-abcd-123456789012";
+    const second = "11111111-1111-4111-8111-111111111111";
+    const input = try validateCreate(.{ .playlist_ids = &.{ id, second }, .title = "Track", .artist = "Artist" });
+    try std.testing.expectEqual(@as(usize, 2), input.playlist_ids.len);
+    const empty = try validateCreate(.{ .playlist_ids = &.{}, .title = "Track", .artist = "Artist" });
+    try std.testing.expectEqual(@as(usize, 0), empty.playlist_ids.len);
+    try std.testing.expectError(error.InvalidPlaylistIds, validateCreate(.{ .playlist_ids = &([_][]const u8{id} ** 101), .title = "Track", .artist = "Artist" }));
+    try std.testing.expectError(error.InvalidPlaylistId, validateCreate(.{ .playlist_ids = &.{ id, "bad" }, .title = "Track", .artist = "Artist" }));
+    try std.testing.expectError(error.DuplicatePlaylistId, validateCreate(.{ .playlist_ids = &.{ id, id }, .title = "Track", .artist = "Artist" }));
+    try std.testing.expectError(error.DuplicatePlaylistId, validateCreate(.{ .playlist_ids = &.{ id, "ABCDEF01-1234-5678-ABCD-123456789012" }, .title = "Track", .artist = "Artist" }));
+}
+
+test "track JSON allows omitted playlist_ids and an empty array" {
+    for ([_][]const u8{
+        "{\"title\":\"Track\",\"artist\":\"Artist\"}",
+        "{\"playlist_ids\":[],\"title\":\"Track\",\"artist\":\"Artist\"}",
+    }) |body| {
+        const parsed = try std.json.parseFromSlice(CreateTrack, std.testing.allocator, body, .{});
+        defer parsed.deinit();
+        const input = try validateCreate(parsed.value);
+        try std.testing.expectEqual(@as(usize, 0), input.playlist_ids.len);
+    }
 }

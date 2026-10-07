@@ -2,6 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Backend: build Debug",
+      "type": "process",
+      "command": "zig",
+      "args": ["build", "-Doptimize=Debug", "--prefix", "zig-out/debug"],
+      "options": { "cwd": "${workspaceFolder}/backend" },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "clear": true }
+    },
+    {
       "label": "Backend: build",
       "type": "shell",
       "command": "zig",

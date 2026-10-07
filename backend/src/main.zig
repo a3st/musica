@@ -6,6 +6,8 @@ const database = @import("infrastructure/database.zig");
 const S3 = @import("infrastructure/s3.zig").S3;
 const health = @import("features/health/routes.zig");
 const tracks = @import("features/tracks/routes.zig");
+const playlists = @import("features/playlists/routes.zig");
+const auth = @import("features/auth/routes.zig");
 
 pub fn main(init: std.process.Init) !void {
     const config = try Config.load(init.environ_map);
@@ -17,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
         .max_upload_bytes = config.max_upload_bytes,
     };
     var server = try httpz.Server(*App).init(init.io, init.gpa, .{
-        .address = .localhost(8080),
+        .address = .{ .ip = config.http_address },
         .request = .{ .max_body_size = config.max_upload_bytes },
         .thread_pool = .{ .count = 4 },
         .timeout = .{ .request = 120 },
@@ -30,12 +32,19 @@ pub fn main(init: std.process.Init) !void {
     const router = try server.router(.{});
     health.register(router);
     tracks.register(router);
+    playlists.register(router);
+    auth.register(router);
 
-    std.log.info("Musica API: http://127.0.0.1:8080", .{});
+    std.log.info("Musica API listening on {f}", .{config.http_address});
     try server.listen();
 }
 
 test {
+    _ = @import("features/playlists/model.zig");
+    _ = @import("features/playlists/routes.zig");
+    _ = @import("features/playlists/service.zig");
+    _ = @import("features/auth/model.zig");
+    _ = @import("features/auth/service.zig");
     _ = @import("config.zig");
     _ = @import("features/tracks/model.zig");
     _ = @import("features/tracks/routes.zig");

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const Config = struct {
+    http_address: std.Io.net.IpAddress,
     pg_host: []const u8,
     pg_port: u16,
     pg_database: []const u8,
@@ -15,6 +16,7 @@ pub const Config = struct {
 
     pub fn load(env: *const std.process.Environ.Map) !Config {
         const config: Config = .{
+            .http_address = try httpAddress(env),
             .pg_host = env.get("PGHOST") orelse "127.0.0.1",
             .pg_port = try std.fmt.parseInt(u16, env.get("PGPORT") orelse "5432", 10),
             .pg_database = env.get("PGDATABASE") orelse "musica",
@@ -51,6 +53,13 @@ pub const Config = struct {
         return config;
     }
 };
+
+fn httpAddress(env: *const std.process.Environ.Map) !std.Io.net.IpAddress {
+    const port = try std.fmt.parseInt(u16, env.get("HTTP_PORT") orelse "8080", 10);
+    if (port == 0) return error.InvalidConfiguration;
+    return std.Io.net.IpAddress.parse(env.get("HTTP_HOST") orelse "127.0.0.1", port) catch
+        error.InvalidConfiguration;
+}
 
 fn required(env: *const std.process.Environ.Map, name: []const u8) ![]const u8 {
     const value = env.get(name) orelse {

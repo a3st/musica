@@ -11,10 +11,14 @@ src/
   main.zig                    Инициализация и регистрация фич
   config.zig                  Конфигурация из окружения
   app.zig                     Общие зависимости и HTTP-ошибки
+  helpers/
+    api.zig                   HTTP-ошибки и разбор JSON
+    sql.zig                   Выполнение запросов и ошибки PostgreSQL
   infrastructure/
     database.zig              Пул PostgreSQL
     s3.zig                    S3-клиент для MinIO
   features/
+    playlists/                Пользовательские плейлисты, доступ и обложки
     health/routes.zig         Проверка доступности процесса
     tracks/
       routes.zig              HTTP-контракт
@@ -27,8 +31,88 @@ migrations/                   SQL для ручного применения
 Новые ручки добавляйте в соответствующую фичу. Маршруты работают с HTTP,
 service координирует операции, repository работает с PostgreSQL,
 infrastructure содержит подключения к внешним сервисам.
+`helpers/api.zig` задаёт общий перевод ошибок в HTTP-статусы и JSON,
+включая проверки ID, файлов, Content-Type/Content-Encoding и неизвестные маршруты.
+Маршруты возвращают ошибки через `api.failure`; статусы и JSON-коды задаются
+только в этом helper-е.
+Он также разбирает JSON-тела с лимитом размера. Для треков лимит остаётся
+16 KiB, для плейлистов и авторизации — 32 KiB. `helpers/sql.zig`
+выполняет параметризованные запросы, переводит ошибки PostgreSQL и копирует
+текстовые результаты в переданный allocator до освобождения буфера драйвера.
+Repositories сохраняют управление транзакциями и перевод общих SQL-ошибок
+в ошибки своей фичи, например блокировки трека в `upload_in_progress`.
 
-## Подготовка и конфигурация
+## Запуск через Docker Compose
+
+Из корня репозитория скопируйте `.env.docker.example` в `.env` и замените
+пароли. В PowerShell:
+
+```powershell
+Copy-Item .env.docker.example .env
+```
+
+Compose запускает три сервиса: PostgreSQL 17, MinIO и backend.
+PostgreSQL и MinIO хранят данные в именованных volumes. Порты опубликованы
+на `127.0.0.1`: backend `8080`, S3 API `9000`, консоль MinIO `9001`.
+PostgreSQL доступен внутри сети Compose; для SQL используйте `docker compose exec`.
+
+Сначала запустите хранилища и дождитесь их healthcheck:
+
+```sh
+docker compose up -d --build --wait postgres minio
+```
+
+Примените миграции **вручную**, один раз, в указанном порядке. Если в `.env`
+изменены `PGUSER` или `PGDATABASE`, замените `musica` в командах:
+
+```sh
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/001_create_albums.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/002_create_tracks.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/003_track_albums.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/004_users_and_albums.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f /migrations/005_pending_track_storage.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/006_albums_to_playlists.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/007_remove_playlist_artist.sql
+```
+
+Создайте бакет вручную через MinIO client внутри контейнера:
+
+```sh
+docker compose exec minio sh -c 'mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null && mc mb --ignore-existing "local/$S3_BUCKET"'
+```
+
+Теперь соберите и запустите backend:
+
+```sh
+docker compose up -d --build --wait
+docker compose ps
+docker compose logs -f backend
+```
+
+API: <http://localhost:8080/api/health>. Консоль MinIO: <http://localhost:9001>,
+логин и пароль — `S3_ACCESS_KEY_ID` и `S3_SECRET_ACCESS_KEY` из `.env`.
+В этом локальном Compose backend использует root keys MinIO.
+Переменные `BACKEND_PORT`, `MINIO_API_PORT`, `MINIO_CONSOLE_PORT` меняют порты
+на хосте; внутри сети адреса остаются `postgres:5432` и `minio:9000`.
+
+Остановка: `docker compose down`. Volumes сохраняются. Значения PostgreSQL
+в `.env` создают БД и пользователя только при первом запуске пустого volume;
+смена пароля в файле не меняет пароль существующей БД.
+
+Dockerfile собирает backend и выполняет тесты с Zig 0.16.0, затем копирует
+ReleaseSafe-бинарник в отдельный runtime-образ. Поддерживаются Linux amd64 и arm64;
+backend запускается с UID/GID `10001`. Архив Zig проверяется по SHA-256 из
+[официального индекса](https://ziglang.org/download/index.json).
+Миграции не запускаются автоматически и не подключены к init-скриптам PostgreSQL.
+
+Образ MinIO также собирается локально: [Dockerfile](docker/minio/Dockerfile)
+использует официальные исходники MinIO `RELEASE.2025-09-07T16-13-09Z` и
+`mc` `RELEASE.2025-08-13T08-35-41Z`, проверяя точные коммиты.
+Это позволяет запускать Compose без недоступных готовых образов MinIO.
+Первая сборка требует загрузки Go-зависимостей и занимает больше времени;
+последующие сборки используют Docker-кеш.
+
+## Подготовка и конфигурация без Docker
 
 Нужны PostgreSQL 14+ и MinIO с доступным S3 API. Создайте БД `musica`,
 пользователя с правами на неё и приватный бакет **`uploads`** в MinIO.
@@ -41,6 +125,7 @@ Backend не создаёт бакет и не применяет миграци
 
 | Переменная | По умолчанию |
 | --- | --- |
+| `HTTP_HOST`, `HTTP_PORT` | `127.0.0.1`, `8080` |
 | `PGHOST` | `127.0.0.1` |
 | `PGPORT` | `5432` |
 | `PGDATABASE`, `PGUSER` | `musica` |
@@ -52,7 +137,8 @@ Backend не создаёт бакет и не применяет миграци
 `S3_ENDPOINT` указывает на S3 API, а не на web console MinIO. Поддерживаются
 HTTP/HTTPS и path-style URL; endpoint должен быть без пути, query и credentials.
 Имена бакетов допускают строчные латинские буквы, цифры и дефис.
-S3-пользователю требуется разрешение `s3:PutObject` для `uploads/tracks/*`.
+S3-пользователю требуется разрешение `s3:PutObject` для `uploads/tracks/*`
+и `uploads/playlists/*` (обложки).
 Этот клиент использует постоянные access/secret keys, без STS session token.
 Соединение PostgreSQL в текущей сборке без TLS; используйте локальную или
 доверенную сеть между backend и БД.
@@ -72,8 +158,9 @@ zig build run
 ```
 
 Backend подключает пул из четырёх соединений PostgreSQL при запуске.
-Если подключиться не удалось, запуск завершается с ошибкой. HTTP слушает
-`127.0.0.1:8080`; для self-hosting используйте reverse proxy.
+Если подключиться не удалось, запуск завершается с ошибкой. HTTP по умолчанию
+слушает `127.0.0.1:8080`. `HTTP_HOST` принимает IP-адрес, `HTTP_PORT` — порт;
+в контейнере используется `0.0.0.0:8080`. Для self-hosting используйте reverse proxy.
 Задача VS Code `Backend: run` наследует окружение самого VS Code:
 запустите редактор из терминала с уже заданными переменными.
 
@@ -84,6 +171,11 @@ Backend подключает пул из четырёх соединений Pos
 ```sh
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/001_create_albums.sql
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/002_create_tracks.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/003_track_albums.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/004_users_and_albums.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f migrations/005_pending_track_storage.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/006_albums_to_playlists.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/007_remove_playlist_artist.sql
 ```
 
 В командах указаны стандартные параметры: замените их при необходимости.
@@ -92,27 +184,155 @@ psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/0
 учёт применённых миграций ведите вручную. `gen_random_uuid()` — встроенная
 функция PostgreSQL, отдельное расширение не требуется.
 
-Ручки альбомов пока нет. Создайте тестовый альбом SQL-запросом и сохраните ID:
+В существующей БД выполните только ещё не применённые миграции.
+`003_track_albums.sql` переносит существующие связи в `track_albums`,
+затем удаляет `tracks.album_id`. `004_users_and_albums.sql` добавляет
+пользователей, сессии, владельцев плейлистов и треков, участников и настройки доступа.
+`005_pending_track_storage.sql` сохраняет бакет и предполагаемый ключ для
+старых `pending`-треков. В команде `SET musica.pending_bucket` укажите
+**прежний** `S3_BUCKET`, куда могли загружаться их файлы. Если были разные
+бакеты, сначала выясните расположение объектов: старая схема его не сохраняла.
+Без этой настройки миграция при наличии `pending`-записей завершится ошибкой.
+Пути и метаданные существующих `ready`-треков сохраняются.
+`006_albums_to_playlists.sql` переименовывает `albums` в `playlists`,
+`track_albums` в `track_playlists`, `album_members` в `playlist_members`
+и поля связей `album_id` в `playlist_id`, обновляет триггер дефолтной коллекции.
+Исторические миграции `001`–`005` не изменены. Если они уже применены,
+выполните только `006` перед запуском новой версии backend.
+ID, связи, настройки доступа, роли, токены ссылок и ключи обложек сохраняются.
+`007_remove_playlist_artist.sql` удаляет старое поле `playlists.artist`
+вместе с его ограничением. У плейлиста нет исполнителя; `tracks.artist`
+сохраняется. Значения удаляемого поля не переносятся.
+
+API переименован: `/api/albums` → `/api/playlists`,
+`/api/shared/albums/:token` → `/api/shared/playlists/:token`,
+`album_ids` → `playlist_ids`, `default_album_id` → `default_playlist_id`.
+Старые URL больше не обслуживаются; для существующих ссылок замените
+`/api/shared/albums/` на `/api/shared/playlists/`, сохранив токен.
+Это переименование существующих коллекций: `Uploads` остаётся дефолтным
+приватным плейлистом, отдельная библиотека пользователя пока не выделена.
+Таблица `track_playlists` сохраняет одну связь на пару трек/плейлист;
+порядок и повторные вхождения через `playlist_items` пока не реализованы.
+Один трек имеет одну запись и один файл независимо от числа плейлистов;
+пары трек/плейлист уникальны. Удаление трека удаляет его связи, удаление
+плейлиста со связанными треками запрещено.
+
+Старые плейлисты и треки сохраняются с `owner_id = NULL` и недоступны через
+новый API. После регистрации нужного пользователя назначьте ему старые записи
+вручную. Например, замените UUID и выполните в транзакции:
 
 ```sql
-INSERT INTO albums (title, artist)
-VALUES ('Первый альбом', 'Исполнитель')
-RETURNING id;
+BEGIN;
+UPDATE playlists SET owner_id = 'UUID-пользователя' WHERE id = 'UUID-старого-плейлиста';
+UPDATE tracks SET owner_id = 'UUID-пользователя' WHERE id = 'UUID-старого-трека';
+INSERT INTO track_playlists (track_id, playlist_id)
+SELECT t.id, a.id FROM tracks t JOIN playlists a ON a.owner_id = t.owner_id AND a.is_default
+WHERE t.id = 'UUID-старого-трека'
+ON CONFLICT DO NOTHING;
+COMMIT;
 ```
 
-## Создание трека
+## Пользователи и сессии
 
-`POST /api/tracks`, `Content-Type: application/json`:
+`POST /api/auth/register` создаёт пользователя, приватный дефолтный плейлист
+`Uploads` и сессию в одной транзакции. `POST /api/auth/login` создаёт новую
+сессию. Тело обоих запросов:
+
+```json
+{"username":"alice","password":"long-password-123"}
+```
+
+Имя: 3–64 символа `a-z`, `0-9`, `_`. Пароль: 12–1024 байта UTF-8.
+Ответ регистрации `201`, входа `200`:
+
+```json
+{"user_id":"UUID","token":"64-символа-hex","token_type":"Bearer","expires_in":2592000}
+```
+
+Передавайте токен в `Authorization: Bearer <token>`. Сессия действует 30 дней.
+`POST /api/auth/logout` отзывает текущую сессию (`204`).
+`GET /api/users/me` возвращает `id`, `username`, `default_playlist_id`.
+Сессии и ссылки используют 256 случайных бит; в БД хранятся только SHA-256-хеши
+токенов. Пароли хешируются Argon2id (19 MiB, 2 прохода, 1 поток), по
+[рекомендации OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+Для внешнего доступа используйте HTTPS и ограничение частоты запросов
+регистрации/входа на reverse proxy. Регистрация сейчас открыта; приглашения
+и восстановление пароля пока отсутствуют. Истёкшие сессии можно удалять вручную:
+`DELETE FROM sessions WHERE expires_at <= now();`.
+
+## Плейлисты и доступ
+
+`POST /api/playlists` с Bearer-токеном создаёт плейлист текущего пользователя:
 
 ```json
 {
-  "album_id": "11111111-1111-4111-8111-111111111111",
+  "title": "Любимые треки",
+  "description": "Музыка для вечера",
+  "tags": ["chill", "live"],
+  "visibility": "private"
+}
+```
+
+Обязательно только `title`: 1–256 символов. Описание по умолчанию пустое,
+до 4096 символов. Теги по умолчанию `[]`: до 32 непустых тегов, каждый до
+64 символов, без пробелов по краям и повторов. Доступ по умолчанию `private`.
+Ответ `201`: `{"id":"UUID","visibility":"private"}`.
+
+| Запрос | Назначение |
+| --- | --- |
+| `GET /api/playlists/:id` | Метаданные и список треков |
+| `PUT /api/playlists/:id` | Заменить название, описание, теги и видимость; тело как при создании, ответ `204` |
+| `PUT /api/playlists/:id/image` | Загрузить обложку байтами PNG/JPEG/WebP, до 5 MiB |
+| `PUT /api/playlists/:id/tracks/:track_id` | Добавить свой трек в плейлист, повторный запрос безопасен (`204`) |
+| `DELETE /api/playlists/:id/tracks/:track_id` | Убрать связь с плейлистом, сохранив трек и файл (`204`) |
+| `PUT /api/playlists/:id/members/:user_id` | Назначить/изменить роль: `{"role":"viewer"}` или `{"role":"editor"}` (`204`) |
+| `DELETE /api/playlists/:id/members/:user_id` | Отозвать доступ участника (`204`) |
+| `POST /api/playlists/:id/share-link` | Создать или заменить ссылку для `unlisted`; ответ `{"path":"/api/shared/playlists/<token>"}` |
+| `DELETE /api/playlists/:id/share-link` | Отозвать ссылку (`204`) |
+| `GET /api/shared/playlists/:token` | Просмотр плейлиста по ссылке без входа |
+
+`private` доступен владельцу и назначенным участникам. `public` доступен
+на просмотр без входа по ID. `unlisted` доступен владельцу, участникам и
+обладателям секретной ссылки; одного ID недостаточно. При уходе из `unlisted`
+ссылка отзывается. Генерация новой ссылки также отзывает предыдущую.
+Приватные и недоступные плейлисты возвращают `404`, чтобы не раскрывать наличие.
+
+`viewer` может просматривать плейлист, `editor` — также изменять метаданные,
+обложку и состав треков. Только владелец управляет участниками и ссылками.
+Публичность и ссылка дают только просмотр. Дефолтный плейлист всегда приватный;
+удалять из него связи с треками нельзя. Каждый новый трек добавляется туда,
+а `playlist_ids` задаёт дополнительные плейлисты с правами владельца или редактора.
+
+Обложки сохраняются в приватный бакет `uploads` под `playlists/<id>/<random>`.
+Старые обложки остаются по сохранённым ключам `albums/<id>/<random>`;
+миграция не перемещает объекты S3 и не меняет их ключи.
+Ответ загрузки содержит `image_key` и `bucket`; `GET` плейлиста тоже возвращает
+`image_key`. Сейчас отдельной ручки скачивания обложки нет. Проверяется MIME
+и сигнатура файла, полноценное декодирование изображения не выполняется.
+Старые обложки и объекты, оставшиеся после сбоя коммита БД, автоматически
+не удаляются; для них потребуется очистка хранилища.
+
+## Создание трека
+
+`POST /api/tracks`, `Content-Type: application/json`, Bearer-токен:
+
+```json
+{
+  "playlist_ids": [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222"
+  ],
   "title": "Название трека",
   "artist": "Исполнитель"
 }
 ```
 
-`album_id` — UUID существующего альбома. `title` и `artist` — непустые UTF-8
+`playlist_ids` необязателен: отсутствие поля или `[]` добавляет трек только
+в дефолтный плейлист текущего пользователя. `null` не принимается.
+Можно передать до 100 UUID дополнительных плейлистов с правом редактирования.
+Повторы запрещены, включая разные регистры одного UUID. Указание дефолтного
+плейлиста не создаёт повторную связь.
+`title` и `artist` — непустые UTF-8
 строки до 256 символов; пробелы по краям удаляются. Лимит JSON — 16 KiB.
 Ответ **201**:
 
@@ -120,12 +340,19 @@ RETURNING id;
 {"id":"UUID-созданного-трека","status":"pending"}
 ```
 
-Сначала создаётся запись в БД без файла. Невалидный JSON или метаданные → `400`,
-неизвестный альбом → `404`, неподходящий Content-Type → `415`.
+Трек и все связи с плейлистами создаются в одной транзакции, без файла.
+При создании записываются `storage_bucket` из текущего `S3_BUCKET` и
+`object_key = tracks/<uuid>`. Статус остаётся `pending`, а `content_type`,
+`size_bytes` и `uploaded_at` — `NULL` до успешной загрузки. Наличие пути
+не означает, что объект уже существует в S3.
+Если хотя бы один плейлист не найден, ни трек, ни связи не сохраняются.
+Невалидный JSON или метаданные → `400`,
+неизвестный плейлист → `404`, неподходящий Content-Type → `415`.
 
 ## Загрузка файла
 
-`PUT /api/tracks/:id/file`: передавайте **сами байты файла** в теле запроса.
+`PUT /api/tracks/:id/file` с Bearer-токеном владельца трека:
+передавайте **сами байты файла** в теле запроса. Чужие треки возвращают `404`.
 Используйте `Content-Type: audio/mpeg`, `audio/flac`, `audio/wav`, `audio/ogg`,
 `audio/aac`, `audio/mp4`, `audio/webm` или `application/octet-stream`.
 Поддерживаются также `audio/x-flac`, `audio/x-wav`, `application/ogg`.
@@ -134,12 +361,13 @@ Multipart/form-data и сжатое Content-Encoding не принимаются
 Пример двух запросов в PowerShell:
 
 ```powershell
-$albumId = 'UUID-из-RETURNING-id'
-$metadata = @{ album_id = $albumId; title = 'Песня'; artist = 'Исполнитель' } | ConvertTo-Json
+$token = 'токен-из-регистрации-или-входа'
+$metadata = @{ title = 'Песня'; artist = 'Исполнитель' } | ConvertTo-Json
 $track = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/api/tracks `
+  -Headers @{ Authorization = "Bearer $token" } `
   -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($metadata))
 curl.exe --fail-with-body -X PUT "http://127.0.0.1:8080/api/tracks/$($track.id)/file" `
-  -H 'Content-Type: audio/mpeg' --data-binary '@track.mp3'
+  -H "Authorization: Bearer $token" -H 'Content-Type: audio/mpeg' --data-binary '@track.mp3'
 ```
 
 Backend отправляет файл в MinIO как S3 PUT, затем сохраняет метаданные объекта
@@ -162,20 +390,34 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
 | Код | Ситуация |
 | --- | --- |
 | `400` | Некорректный ID, пустое тело или невалидные метаданные |
-| `404` | Альбом или трек не найден |
+| `401` | Нет действительной сессии |
+| `404` | Плейлист или трек не найден |
 | `409` | Трек уже загружен или другой PUT сейчас загружает этот трек |
 | `413` | Превышен лимит тела запроса |
 | `415` | Неподдерживаемый Content-Type/Content-Encoding |
-| `502` | Ошибка S3/MinIO |
-| `503` | Ошибка PostgreSQL, включая отсутствие применённых миграций |
-| `504` | S3-операция превысила 60 секунд |
+| `500` | В ReleaseSafe/ReleaseFast/ReleaseSmall: внутренняя ошибка без раскрытия причины |
+| `502` | Только Debug: ошибка S3/MinIO |
+| `503` | Только Debug: ошибка PostgreSQL, включая отсутствие применённых миграций |
+| `504` | Только Debug: S3-операция превысила 60 секунд |
 
 Ошибки ручек возвращаются в форме `{"error":"код_ошибки"}`. Ошибка размера
 тела, обнаруженная самим HTTP-сервером до маршрута, может иметь другой формат.
+В Debug сбои инфраструктуры возвращают `database_unavailable`,
+`storage_unavailable` или `storage_timeout`. Во всех Release-сборках они
+возвращают одинаковые `500` и `{"error":"internal_error"}`. Причина остаётся
+в серверных логах; для SQL дополнительно записывается SQLSTATE, когда он
+доступен. Текст SQL, параметры запросов и сообщения PostgreSQL не логируются.
+Ошибки валидации, авторизации, доступа и конфликты сохраняют свои коды.
 
 Загрузка держит `SELECT ... FOR UPDATE NOWAIT` до завершения S3 и коммита БД.
 После ошибки S3 транзакция откатывается, трек остаётся `pending`: PUT можно
 повторить. Для `ready` повторная загрузка запрещена.
+Загрузка использует сохранённые в БД бакет и ключ; смена `S3_BUCKET` влияет
+только на новые треки. В ответе PUT возвращается фактически использованный
+бакет, даже если он отличается от текущей конфигурации. Backend должен иметь
+доступ к прежнему бакету на текущем `S3_ENDPOINT`.
+Сохранённый путь также позволит удалять оставшиеся объекты при очистке
+заброшенных `pending`-треков; сама задача очистки пока не реализована.
 
 PostgreSQL и S3 не образуют общую транзакцию. При успешном S3 PUT и ошибке
 обновления/коммита БД объект может остаться в бакете. Повторный PUT для
@@ -183,8 +425,42 @@ PostgreSQL и S3 не образуют общую транзакцию. При �
 коммита запись может уже стать `ready`; повторный PUT тогда вернёт `409`.
 
 `GET /api/health` сохраняет прежний контракт и проверяет доступность процесса,
-а не текущую готовность PostgreSQL или MinIO. Авторизация и скачивание пока
-не реализованы.
+а не текущую готовность PostgreSQL или MinIO. Скачивание аудио пока не реализовано.
+
+## Отладка в VS Code на Windows
+
+Откройте корень репозитория в VS Code. Нужны Zig 0.16.0 в `PATH` и
+расширение [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools).
+Расширение Zig рекомендуется для работы с исходниками.
+
+Создайте локальный файл настроек из корня проекта, если его ещё нет:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+```
+
+В `backend/.env` задайте реальные `PGPASSWORD`, `S3_ACCESS_KEY_ID` и
+`S3_SECRET_ACCESS_KEY`, а также адреса сервисов. Для хранилищ из Compose
+используйте `PGHOST=127.0.0.1`, опубликованный `PGPORT` и
+`S3_ENDPOINT=http://127.0.0.1:9000` (или ваш опубликованный порт MinIO).
+Учётные данные должны совпадать с корневым `.env` Compose.
+Запустите только хранилища: `docker compose up -d --wait postgres minio`.
+Миграции применяются вручную, как описано выше.
+
+В панели Run and Debug выберите **Backend: debug (Windows)**, поставьте
+breakpoint в `src/main.zig` или обработчике маршрута и нажмите **F5**.
+Перед запуском задача **Backend: build Debug** выполняет
+`zig build -Doptimize=Debug --prefix zig-out/debug`. EXE и PDB находятся
+в `backend/zig-out/debug/bin/`; отладчик запускает EXE напрямую.
+Для breakpoint в HTTP-обработчике отправьте соответствующий запрос к API.
+
+Настройки из `backend/.env` загружает отладчик VS Code через `envFile`;
+обычный `zig build run` по-прежнему наследует окружение процесса.
+Файл с секретами исключён из Git. Если порт backend занят другим процессом
+или контейнером, остановите его либо задайте другой `HTTP_PORT` в `backend/.env`.
+**Shift+F5** останавливает отлаживаемый backend.
+
+Описание параметров отладчика: [документация VS Code](https://code.visualstudio.com/docs/cpp/launch-json-reference).
 
 ## Проверки
 
@@ -192,6 +468,7 @@ PostgreSQL и S3 не образуют общую транзакцию. При �
 zig fmt --check build.zig src
 zig build
 zig build test --summary all
+zig build test -Doptimize=ReleaseSafe --summary all
 zig build -Doptimize=ReleaseSafe
 ```
 
@@ -199,8 +476,24 @@ zig build -Doptimize=ReleaseSafe
 независимом примере, бинарный PUT, отказ хранилища и отмену зависшего запроса
 на локальном тестовом сервере.
 Они не требуют PostgreSQL или MinIO. Для сквозной проверки запустите оба сервиса,
-примените миграции вручную, выполните два запроса выше и проверьте строку `tracks`
-и объект в бакете `uploads`.
+примените миграции вручную, выполните запросы выше и проверьте строку `tracks`,
+её связи в `track_playlists` и объект в бакете `uploads`.
+
+Автоматическая интеграционная проверка из корня репозитория:
+
+```sh
+python backend/tests/api_integration.py
+python backend/tests/api_integration.py --optimize ReleaseSafe
+```
+
+Нужны Python 3, работающий Docker Compose и Zig 0.16. Скрипт создаёт отдельный
+случайно названный проект с пустой PostgreSQL, применяет миграции только в нём,
+проверяет перенос старых связей, сессии, права, дефолтные плейлисты, изменение
+метаданных, обложки, шаринг и откат создания трека, затем удаляет тестовые
+контейнеры и volume. Пользовательская БД не затрагивается. S3 здесь заменён
+локальным HTTP-сервером; для проверки настоящего MinIO используйте ручной сценарий.
+Проверяются также ответы и логи при сбоях БД и S3: диагностические в Debug,
+без указания инфраструктуры в Release.
 
 Протокол S3 опирается на [PutObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html)
 и [AWS Signature V4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html).

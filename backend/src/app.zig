@@ -2,6 +2,7 @@ const std = @import("std");
 const httpz = @import("httpz");
 const pg = @import("pg");
 const S3 = @import("infrastructure/s3.zig").S3;
+const api = @import("helpers/api.zig");
 
 pub const App = struct {
     db: *pg.Pool,
@@ -9,7 +10,7 @@ pub const App = struct {
     max_upload_bytes: usize,
 
     pub fn notFound(_: *App, _: *httpz.Request, res: *httpz.Response) !void {
-        try respondError(res, 404, "not_found");
+        try api.failure(res, error.NotFound);
     }
 
     pub fn uncaughtError(_: *App, _: *httpz.Request, res: *httpz.Response, err: anyerror) void {
@@ -20,9 +21,3 @@ pub const App = struct {
         res.header("Cache-Control", "no-store");
     }
 };
-
-pub fn respondError(res: *httpz.Response, status: u16, code: []const u8) !void {
-    res.status = status;
-    res.header("Cache-Control", "no-store");
-    try res.json(.{ .@"error" = code }, .{});
-}

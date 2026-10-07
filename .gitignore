@@ -38,6 +38,8 @@ zig-pkg/
 .idea/
 .vscode/*
 !.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 *.swp
 *.swo
 .DS_Store
