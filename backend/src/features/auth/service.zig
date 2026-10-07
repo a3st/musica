@@ -44,13 +44,44 @@ pub fn bearer(req: *httpz.Request) ![]const u8 {
 }
 
 pub fn optionalUser(app: *App, req: *httpz.Request, arena: std.mem.Allocator) !?[]const u8 {
-    if (req.header("authorization") == null) return null;
+    if (req.header("authorization") == null and cookieToken(req.header("cookie") orelse "") == null) return null;
     return try requireUser(app, req, arena);
 }
 
 pub fn requireUser(app: *App, req: *httpz.Request, arena: std.mem.Allocator) ![]const u8 {
-    const hash = model.tokenHash(try bearer(req));
+    const hash = model.tokenHash(try requestToken(req));
     return repository.resolve(app.db, arena, &hash);
+}
+
+pub fn requestToken(req: *httpz.Request) ![]const u8 {
+    if (req.header("authorization") != null) return bearer(req);
+    const token = cookieToken(req.header("cookie") orelse "") orelse return error.Unauthorized;
+    // Cookie-based writes must originate from this host; Bearer clients remain independent.
+    if (req.method != .GET and req.method != .HEAD) {
+        if (req.header("origin")) |origin| {
+            const delimiter = std.mem.indexOf(u8, origin, "://") orelse return error.Forbidden;
+            if (!std.ascii.eqlIgnoreCase(origin[delimiter + 3 ..], req.header("host") orelse "")) return error.Forbidden;
+        }
+    }
+    return token;
+}
+
+fn cookieToken(header: []const u8) ?[]const u8 {
+    var parts = std.mem.splitScalar(u8, header, ';');
+    while (parts.next()) |part| {
+        const value = std.mem.trim(u8, part, " \t");
+        if (std.mem.startsWith(u8, value, "musica_session=")) {
+            const token = value[15..];
+            return if (model.validToken(token)) token else null;
+        }
+    }
+    return null;
+}
+
+test "session cookie parsing rejects malformed tokens and permits other cookies" {
+    try std.testing.expectEqualStrings("a" ** 64, cookieToken("other=1; musica_session=" ++ "a" ** 64 ++ "; theme=dark").?);
+    try std.testing.expect(cookieToken("musica_session=invalid") == null);
+    try std.testing.expect(cookieToken("xmusica_session=" ++ "a" ** 64) == null);
 }
 
 test "Argon2id hashes verify and reject a wrong password" {

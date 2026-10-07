@@ -7,9 +7,15 @@ const json_playlist =
     \\'description', a.description, 'tags', a.tags, 'visibility', a.visibility,
     \\'is_default', a.is_default, 'image_key', a.image_key,
     \\'tracks', COALESCE((SELECT json_agg(json_build_object('id', t.id, 'title', t.title,
-    \\'artist', t.artist, 'status', t.status) ORDER BY t.created_at, t.id)
+    \\'artist', t.artist, 'status', t.status, 'owner_id', t.owner_id) ORDER BY t.created_at, t.id)
     \\FROM tracks t JOIN track_playlists ta ON ta.track_id = t.id WHERE ta.playlist_id = a.id), '[]'::json))::text
 ;
+
+pub fn list(pool: *pg.Pool, arena: std.mem.Allocator, user: []const u8) ![]const u8 {
+    const conn = pool.acquire() catch return error.DatabaseUnavailable;
+    defer conn.release();
+    return (try sql.text(conn, arena, "SELECT COALESCE(json_agg(item ORDER BY is_default DESC, title, id), '[]'::json)::text FROM (SELECT a.id,a.title,a.is_default,json_build_object('id',a.id,'owner_id',a.owner_id,'title',a.title,'description',a.description,'visibility',a.visibility,'is_default',a.is_default,'image_key',a.image_key,'role',CASE WHEN a.owner_id=$1 THEN 'owner' ELSE m.role END,'track_count',(SELECT count(*) FROM track_playlists tp WHERE tp.playlist_id=a.id)) AS item FROM playlists a LEFT JOIN playlist_members m ON m.playlist_id=a.id AND m.user_id=$1 WHERE a.owner_id=$1 OR m.user_id=$1) accessible", .{user})) orelse error.DatabaseUnavailable;
+}
 
 pub fn create(pool: *pg.Pool, arena: std.mem.Allocator, user: []const u8, title: []const u8, description: []const u8, tags: []const u8, visibility: []const u8) ![]const u8 {
     const conn = pool.acquire() catch return error.DatabaseUnavailable;
@@ -103,8 +109,10 @@ pub fn track(pool: *pg.Pool, arena: std.mem.Allocator, id: []const u8, user: []c
         _ = (try sql.text(conn, arena, "SELECT id::text FROM tracks WHERE id = $1 AND owner_id = $2 FOR UPDATE", .{ track_id, user })) orelse return error.TrackNotFound;
         _ = try sql.exec(conn, "INSERT INTO track_playlists (playlist_id, track_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", .{ id, track_id });
     } else {
-        if ((try sql.text(conn, arena, "SELECT id::text FROM playlists WHERE id = $1 AND is_default", .{id})) != null) return error.InvalidInput;
-        if (try sql.exec(conn, "DELETE FROM track_playlists WHERE playlist_id = $1 AND track_id = $2", .{ id, track_id }) != 1) return error.TrackNotFound;
+        if ((try sql.text(conn, arena, "SELECT id::text FROM playlists WHERE id = $1 AND is_default", .{id})) != null) {
+            _ = (try sql.text(conn, arena, "SELECT track_id::text FROM track_playlists WHERE playlist_id=$1 AND track_id=$2", .{ id, track_id })) orelse return error.TrackNotFound;
+            try @import("../tracks/repository.zig").removeWithConn(conn, arena, user, track_id);
+        } else if (try sql.exec(conn, "DELETE FROM track_playlists WHERE playlist_id = $1 AND track_id = $2", .{ id, track_id }) != 1) return error.TrackNotFound;
     }
     conn.commit() catch return error.DatabaseUnavailable;
 }

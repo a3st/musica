@@ -1,7 +1,7 @@
 # Backend Musica
 
 Zig **0.16.0**, HTTP-сервер `httpz`, PostgreSQL через `pg.zig`, MinIO через
-S3 PutObject/GetObject с подписью AWS Signature V4, HLS через FFmpeg. Обе Zig-зависимости закреплены
+S3 PutObject/GetObject/DeleteObject с подписью AWS Signature V4, HLS через FFmpeg. Обе Zig-зависимости закреплены
 на конкретных коммитах для Zig 0.16.
 
 ## Архитектура
@@ -76,6 +76,7 @@ docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /mig
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/007_remove_playlist_artist.sql
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/008_track_status_enum.sql
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/009_track_hls.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/010_track_file_deletions.sql
 ```
 
 Создайте бакет вручную через MinIO client внутри контейнера:
@@ -135,14 +136,15 @@ Backend не создаёт бакет и не применяет миграци
 | `PGDATABASE`, `PGUSER` | `musica` |
 | `S3_ENDPOINT` | `http://127.0.0.1:9000` |
 | `S3_REGION` | `us-east-1` |
-| `S3_BUCKET` | `uploads` |
+| `S3_BUCKET` | `media` (Compose задаёт `uploads`) |
 | `MAX_UPLOAD_BYTES` | `67108864` (64 MiB), максимум 512 MiB |
+| `AUTH_COOKIE_SECURE` | `false`; установите `true` при HTTPS |
 
 `S3_ENDPOINT` указывает на S3 API, а не на web console MinIO. Поддерживаются
 HTTP/HTTPS и path-style URL; endpoint должен быть без пути, query и credentials.
 Имена бакетов допускают строчные латинские буквы, цифры и дефис.
-S3-пользователю требуется разрешение `s3:PutObject` для `uploads/tracks/*`
-и `uploads/playlists/*` (обложки).
+S3-пользователю нужны `s3:PutObject`, `s3:GetObject` для треков и обложек,
+а также `s3:DeleteObject` для треков в настроенном бакете и исторических бакетах.
 Этот клиент использует постоянные access/secret keys, без STS session token.
 Соединение PostgreSQL в текущей сборке без TLS; используйте локальную или
 доверенную сеть между backend и БД.
@@ -182,6 +184,7 @@ psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/0
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/007_remove_playlist_artist.sql
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/008_track_status_enum.sql
 psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/009_track_hls.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/010_track_file_deletions.sql
 ```
 
 В командах указаны стандартные параметры: замените их при необходимости.
@@ -219,6 +222,10 @@ enum `track_status`. В Zig используется `TrackStatus`. Значен
 `009_track_hls.sql` добавляет `streamed`, поля готового HLS и очередь
 `track_hls_jobs`. Исходные файлы и статусы старых треков сохраняются.
 Сначала примените миграции, затем запустите новую версию backend.
+
+`010_track_file_deletions.sql` добавляет постоянную очередь удаления объектов
+MinIO. Запись в неё создаётся в одной транзакции с удалением трека. Примените
+миграцию вручную перед обновлением backend; автоматически она не выполняется.
 
 API переименован: `/api/albums` → `/api/playlists`,
 `/api/shared/albums/:token` → `/api/shared/playlists/:token`,
@@ -266,7 +273,13 @@ COMMIT;
 ```
 
 Передавайте токен в `Authorization: Bearer <token>`. Сессия действует 30 дней.
-`POST /api/auth/logout` отзывает текущую сессию (`204`).
+Вход/регистрация также устанавливают `musica_session` с `HttpOnly`,
+`SameSite=Strict`, `Path=/api`. Браузер может использовать эту cookie
+вместо Bearer, в том числе для нативного HLS. При HTTPS задайте
+`AUTH_COOKIE_SECURE=true`. Для cookie-запросов, меняющих данные, присутствующий
+`Origin` должен совпадать с `Host`; reverse proxy должен сохранять исходный Host.
+Bearer имеет приоритет, токены в query не используются.
+`POST /api/auth/logout` отзывает текущую сессию и очищает cookie (`204`).
 `GET /api/users/me` возвращает `id`, `username`, `default_playlist_id`.
 Сессии и ссылки используют 256 случайных бит; в БД хранятся только SHA-256-хеши
 токенов. Пароли хешируются Argon2id (19 MiB, 2 прохода, 1 поток), по
@@ -296,11 +309,14 @@ COMMIT;
 
 | Запрос | Назначение |
 | --- | --- |
+| `GET /api/playlists` | Свои плейлисты и плейлисты с назначенной ролью: метаданные, `role`, `track_count`; сначала Uploads, затем название |
 | `GET /api/playlists/:id` | Метаданные и список треков |
 | `PUT /api/playlists/:id` | Заменить название, описание, теги и видимость; тело как при создании, ответ `204` |
 | `PUT /api/playlists/:id/image` | Загрузить обложку байтами PNG/JPEG/WebP, до 5 MiB |
+| `GET /api/playlists/:id/image` | Получить обложку с проверкой доступа к плейлисту; без обложки `404` |
 | `PUT /api/playlists/:id/tracks/:track_id` | Добавить свой трек в плейлист, повторный запрос безопасен (`204`) |
-| `DELETE /api/playlists/:id/tracks/:track_id` | Убрать связь с плейлистом, сохранив трек и файл (`204`) |
+| `DELETE /api/playlists/:id/tracks/:track_id` | Обычный плейлист: убрать связь; Uploads: удалить свой трек целиком (`204`) |
+| `DELETE /api/tracks/:id` | Удалить свой трек, все связи и поставить файлы на очистку (`204`) |
 | `PUT /api/playlists/:id/members/:user_id` | Назначить/изменить роль: `{"role":"viewer"}` или `{"role":"editor"}` (`204`) |
 | `DELETE /api/playlists/:id/members/:user_id` | Отозвать доступ участника (`204`) |
 | `POST /api/playlists/:id/share-link` | Создать или заменить ссылку для `unlisted`; ответ `{"path":"/api/shared/playlists/<token>"}` |
@@ -316,12 +332,26 @@ COMMIT;
 `viewer` может просматривать плейлист, `editor` — также изменять метаданные,
 обложку и состав треков. Только владелец управляет участниками и ссылками.
 Публичность и ссылка дают только просмотр. Дефолтный плейлист всегда приватный;
-удалять из него связи с треками нельзя. Каждый новый трек добавляется туда,
+удаление из него удаляет сам трек. Каждый новый трек добавляется туда,
 а `playlist_ids` задаёт дополнительные плейлисты с правами владельца или редактора.
 
 Обложки сохраняются в приватный бакет `uploads` под `playlists/<id>/<random>`.
 Старые обложки остаются по сохранённым ключам `albums/<id>/<random>`;
 миграция не перемещает объекты S3 и не меняет их ключи.
+
+Список `/api/playlists` требует входа; публичные плейлисты других пользователей
+без назначенной роли в него не включаются. В треках ответа есть `owner_id`,
+для исторических записей он может быть `null`.
+
+Полное удаление трека атомарно удаляет его запись, все связи и задачу HLS.
+При активном PUT возвращается `409 upload_in_progress`, при действующей аренде
+HLS — `409 track_preparation_in_progress`; повторите удаление после завершения.
+Фоновый воркер каждой ноды очищает оригинал, опубликованный манифест и сегменты
+по сохранённым бакету/ключам. При сбое MinIO задача повторяется через 30 секунд;
+после падения ноды — после истечения 120-секундной аренды. DELETE объекта
+идемпотентен. HTTP `204` означает, что запись удалена и очистка поставлена в очередь,
+а не что MinIO уже ответил. Очередь работает и при `HLS_WORKER_ENABLED=false`.
+Незавершённые префиксы прежних HLS-попыток пока требуют отдельной очистки.
 Ответ загрузки содержит `image_key` и `bucket`; `GET` плейлиста тоже возвращает
 `image_key`. Сейчас отдельной ручки скачивания обложки нет. Проверяется MIME
 и сигнатура файла, полноценное декодирование изображения не выполняется.
@@ -479,7 +509,7 @@ curl.exe "http://127.0.0.1:8080/api/tracks/$track/hls/index.m3u8" -H "Authorizat
 
 Каждый GET проверяет доступ: владелец трека, участник связанного плейлиста,
 публичный плейлист или действующая ссылка unlisted-плейлиста. Для приватного
-воспроизведения HLS-клиент должен передавать Bearer в запросах манифеста
+воспроизведения HLS-клиент передаёт Bearer либо cookie-сессию в запросах манифеста
 и всех сегментов. Для доступа по ссылке передайте `?share_token=<token>`
 к манифесту; backend добавит этот параметр в относительные URL сегментов.
 Отзыв ссылки/участника действует и для последующих запросов сегментов.
@@ -608,7 +638,9 @@ python backend/tests/api_integration.py --optimize ReleaseSafe --backend-image m
 AAC-сегменты через ffprobe, работу двух воркеров и отдельной HTTP-ноды,
 восстановление истёкшей аренды и отказ публикации старой попытки, права
 на сегменты, отзыв ссылки, ошибку конвертации и повторный запуск.
-Выбирайте `--optimize`, соответствующий режиму сборки образа. SigV4 PUT и GET
+Дополнительно проверяются cookie/CSRF, список плейлистов, чтение обложки,
+два режима удаления, очистка оригинала/HLS и повтор после отказа MinIO.
+Выбирайте `--optimize`, соответствующий режиму сборки образа. SigV4 PUT, GET и DELETE
 проверяются тестовым S3-сервером независимо через Python hashlib/hmac.
 
 Протокол S3 опирается на [PutObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html)

@@ -1,4 +1,5 @@
 const httpz = @import("httpz");
+const std = @import("std");
 const App = @import("../../app.zig").App;
 const api = @import("../../helpers/api.zig");
 const model = @import("model.zig");
@@ -17,6 +18,7 @@ fn signup(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const result = service.register(app, res.arena, input) catch |err| return api.failure(res, err);
     res.status = 201;
     res.header("Cache-Control", "no-store");
+    try sessionCookie(app, res, &result.token, false);
     try res.json(.{ .user_id = result.user_id, .token = &result.token, .token_type = "Bearer", .expires_in = 30 * 24 * 60 * 60 }, .{});
 }
 
@@ -24,15 +26,22 @@ fn login(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const input = (try api.json(req, res, model.Credentials)) orelse return;
     const result = service.login(app, res.arena, input) catch |err| return api.failure(res, err);
     res.header("Cache-Control", "no-store");
+    try sessionCookie(app, res, &result.token, false);
     try res.json(.{ .user_id = result.user_id, .token = &result.token, .token_type = "Bearer", .expires_in = 30 * 24 * 60 * 60 }, .{});
 }
 
 fn logout(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     _ = service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    const hash = model.tokenHash(try service.bearer(req));
+    const hash = model.tokenHash(try service.requestToken(req));
     repository.logout(app.db, &hash) catch |err| return api.failure(res, err);
     res.status = 204;
     res.header("Cache-Control", "no-store");
+    try sessionCookie(app, res, "", true);
+}
+
+fn sessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: bool) !void {
+    const cookie = try std.fmt.allocPrint(res.arena, "musica_session={s}; Path=/api; HttpOnly; SameSite=Strict; Max-Age={d}{s}", .{ token, @as(u32, if (remove) 0 else 30 * 24 * 60 * 60), if (app.cookie_secure) "; Secure" else "" });
+    res.header("Set-Cookie", cookie);
 }
 
 fn me(app: *App, req: *httpz.Request, res: *httpz.Response) !void {

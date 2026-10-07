@@ -9,6 +9,10 @@ pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: mode
 
 pub const StorageLocation = struct { bucket: []const u8, key: []const u8 };
 
+pub fn remove(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const u8) !void {
+    try repository.remove(app.db, arena, user, id);
+}
+
 pub fn upload(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const u8, mime: []const u8, data: []const u8) !StorageLocation {
     var transaction = try repository.Upload.begin(app.db, arena, id, user);
     defer transaction.deinit();

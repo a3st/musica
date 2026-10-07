@@ -17,6 +17,7 @@ pub const Config = struct {
     hls_tmp_dir: []const u8,
     hls_worker_enabled: bool,
     hls_timeout_seconds: u32,
+    cookie_secure: bool,
 
     pub fn load(env: *const std.process.Environ.Map) !Config {
         const config: Config = .{
@@ -28,7 +29,7 @@ pub const Config = struct {
             .pg_password = try required(env, "PGPASSWORD"),
             .s3_endpoint = std.mem.trimEnd(u8, env.get("S3_ENDPOINT") orelse "http://127.0.0.1:9000", "/"),
             .s3_region = env.get("S3_REGION") orelse "us-east-1",
-            .s3_bucket = env.get("S3_BUCKET") orelse "uploads",
+            .s3_bucket = env.get("S3_BUCKET") orelse "media",
             .s3_access_key = try required(env, "S3_ACCESS_KEY_ID"),
             .s3_secret_key = try required(env, "S3_SECRET_ACCESS_KEY"),
             .max_upload_bytes = try std.fmt.parseInt(usize, env.get("MAX_UPLOAD_BYTES") orelse "67108864", 10),
@@ -36,6 +37,7 @@ pub const Config = struct {
             .hls_tmp_dir = env.get("HLS_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-hls",
             .hls_worker_enabled = try boolean(env.get("HLS_WORKER_ENABLED") orelse "true"),
             .hls_timeout_seconds = try std.fmt.parseInt(u32, env.get("HLS_TIMEOUT_SECONDS") orelse "900", 10),
+            .cookie_secure = try boolean(env.get("AUTH_COOKIE_SECURE") orelse "false"),
         };
         if (config.pg_port == 0 or config.max_upload_bytes == 0 or config.max_upload_bytes > 512 * 1024 * 1024)
             return error.InvalidConfiguration;

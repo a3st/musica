@@ -7,11 +7,18 @@
     "dev": "vite --host 127.0.0.1",
     "check": "tsc --noEmit",
     "build": "npm run check && vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test:ui": "node tests/ui.mjs",
+    "test:pwa": "node tests/pwa.mjs",
+    "test:proxy": "node tests/proxy.mjs"
   },
   "devDependencies": {
+    "playwright": "1.58.2",
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
     "vite-plugin-pwa": "^1.0.3"
+  },
+  "dependencies": {
+    "hls.js": "1.7.3"
   }
 }

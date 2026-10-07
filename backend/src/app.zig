@@ -11,6 +11,7 @@ pub const App = struct {
     ffmpeg_path: []const u8 = "ffmpeg",
     hls_tmp_dir: []const u8 = "/tmp/musica-hls",
     hls_timeout_seconds: u32 = 900,
+    cookie_secure: bool = false,
 
     pub fn notFound(_: *App, _: *httpz.Request, res: *httpz.Response) !void {
         try api.failure(res, error.NotFound);

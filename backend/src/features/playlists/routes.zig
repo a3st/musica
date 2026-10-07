@@ -11,9 +11,11 @@ const service = @import("service.zig");
 
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/playlists", create, .{});
+    router.get("/api/playlists", list, .{});
     router.get("/api/playlists/:id", read, .{});
     router.put("/api/playlists/:id", update, .{});
     router.put("/api/playlists/:id/image", image, .{});
+    router.get("/api/playlists/:id/image", readImage, .{});
     router.put("/api/playlists/:id/members/:user_id", member, .{});
     router.delete("/api/playlists/:id/members/:user_id", removeMember, .{});
     router.put("/api/playlists/:id/tracks/:track_id", addTrack, .{});
@@ -21,6 +23,27 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/playlists/:id/share-link", shareLink, .{});
     router.delete("/api/playlists/:id/share-link", revokeLink, .{});
     router.get("/api/shared/playlists/:token", shared, .{});
+}
+
+fn list(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    api.jsonText(res, repository.list(app.db, res.arena, user) catch |err| return api.failure(res, err));
+}
+
+fn readImage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const playlist = id(req, "id") catch |err| return api.failure(res, err);
+    const user = auth.optionalUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const body = repository.read(app.db, res.arena, playlist, user) catch |err| return api.failure(res, err);
+    const data = try std.json.parseFromSliceLeaky(struct { image_key: ?[]const u8 }, res.arena, body, .{ .ignore_unknown_fields = true });
+    const key = data.image_key orelse return api.failure(res, error.NotFound);
+    const bytes = app.storage.get(res.arena, key, 5 * 1024 * 1024) catch |err| {
+        std.log.err("Playlist image download failed: {s}", .{@errorName(err)});
+        return api.failure(res, if (err == error.StorageTimeout) error.StorageTimeout else error.StorageUnavailable);
+    };
+    const mime = if (service.validImage("image/png", bytes)) "image/png" else if (service.validImage("image/jpeg", bytes)) "image/jpeg" else if (service.validImage("image/webp", bytes)) "image/webp" else return api.failure(res, error.StorageUnavailable);
+    res.body = bytes;
+    res.header("Content-Type", mime);
+    res.header("Cache-Control", "no-store");
 }
 
 fn id(req: *httpz.Request, name: []const u8) ![]const u8 {

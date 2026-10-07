@@ -9,6 +9,16 @@ const api = @import("../../helpers/api.zig");
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/tracks", create, .{});
     router.put("/api/tracks/:id/file", upload, .{});
+    router.delete("/api/tracks/:id", remove, .{});
+}
+
+fn remove(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const id = req.param("id") orelse return api.failure(res, error.InvalidTrackId);
+    if (!model.validId(id)) return api.failure(res, error.InvalidTrackId);
+    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    service.remove(app, res.arena, user, id) catch |err| return api.failure(res, err);
+    res.status = 204;
+    res.header("Cache-Control", "no-store");
 }
 
 fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {

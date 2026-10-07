@@ -40,7 +40,27 @@ pub const S3 = struct {
         var buffer: [2]Result = undefined;
         var select = std.Io.Select(Result).init(self.io, &buffer);
         defer select.cancelDiscard();
-        try select.concurrent(.request, send, .{ self, url, host, mime, data, signed, &timestamp });
+        try select.concurrent(.request, send, .{ self, url, host, mime, data, signed, &timestamp, .PUT });
+        try select.concurrent(.deadline, deadline, .{ self.io, self.timeout_ms });
+        switch (try select.await()) {
+            .request => |result| try result,
+            .deadline => return error.StorageTimeout,
+        }
+    }
+
+    pub fn delete(self: S3, arena: std.mem.Allocator, key: []const u8) !void {
+        try validateKey(key);
+        const path = try std.fmt.allocPrint(arena, "/{s}/{s}", .{ self.bucket, key });
+        const url = try std.fmt.allocPrint(arena, "{s}{s}", .{ self.endpoint, path });
+        const delimiter = std.mem.indexOf(u8, self.endpoint, "://") orelse return error.InvalidConfiguration;
+        const host = self.endpoint[delimiter + 3 ..];
+        const timestamp = try formatTimestamp(self.io);
+        const signed = try signRequest(arena, "DELETE", self.access_key, self.secret_key, self.region, host, path, "application/octet-stream", "", &timestamp);
+        const Result = union(enum) { request: anyerror!void, deadline: anyerror!void };
+        var buffer: [2]Result = undefined;
+        var select = std.Io.Select(Result).init(self.io, &buffer);
+        defer select.cancelDiscard();
+        try select.concurrent(.request, send, .{ self, url, host, "application/octet-stream", "", signed, &timestamp, .DELETE });
         try select.concurrent(.deadline, deadline, .{ self.io, self.timeout_ms });
         switch (try select.await()) {
             .request => |result| try result,
@@ -95,14 +115,14 @@ pub const S3 = struct {
         }
     }
 
-    fn send(self: S3, url: []const u8, host: []const u8, mime: []const u8, data: []const u8, signed: Signed, timestamp: []const u8) anyerror!void {
+    fn send(self: S3, url: []const u8, host: []const u8, mime: []const u8, data: []const u8, signed: Signed, timestamp: []const u8, method: std.http.Method) anyerror!void {
         // A client per operation avoids sharing request state between HTTP workers.
         var client: std.http.Client = .{ .io = self.io, .allocator = self.allocator };
         defer client.deinit();
         const result = try client.fetch(.{
             .location = .{ .url = url },
-            .method = .PUT,
-            .payload = data,
+            .method = method,
+            .payload = if (method == .PUT) data else null,
             .redirect_behavior = .unhandled,
             .keep_alive = false,
             .headers = .{
@@ -115,9 +135,10 @@ pub const S3 = struct {
                 .{ .name = "x-amz-date", .value = timestamp },
             },
         });
-        if (result.status != .ok) {
+        const expected: std.http.Status = if (method == .PUT) .ok else .no_content;
+        if (result.status != expected) {
             // Do not log storage responses or credentials.
-            std.log.warn("S3 PutObject returned HTTP {d}", .{@intFromEnum(result.status)});
+            std.log.warn("S3 {s} returned HTTP {d}", .{ if (method == .PUT) "PutObject" else "DeleteObject", @intFromEnum(result.status) });
             return error.StorageRejected;
         }
     }

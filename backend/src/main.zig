@@ -22,6 +22,7 @@ pub fn main(init: std.process.Init) !void {
         .ffmpeg_path = config.ffmpeg_path,
         .hls_tmp_dir = config.hls_tmp_dir,
         .hls_timeout_seconds = config.hls_timeout_seconds,
+        .cookie_secure = config.cookie_secure,
     };
     var server = try httpz.Server(*App).init(init.io, init.gpa, .{
         .address = .{ .ip = config.http_address },
@@ -46,6 +47,8 @@ pub fn main(init: std.process.Init) !void {
     else
         null;
     defer if (worker) |*future| future.cancel(init.io) catch {};
+    var cleanup = try init.io.concurrent(@import("features/tracks/cleanup.zig").run, .{&app});
+    defer cleanup.cancel(init.io) catch {};
 
     std.log.info("Musica API listening on {f}", .{config.http_address});
     try server.listen();

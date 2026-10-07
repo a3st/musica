@@ -44,6 +44,7 @@ def run_checks(optimize="Debug", backend_image=None):
     release_upload = threading.Event()
     reject_upload = False
     reject_read = False
+    reject_delete = False
     blocked_get_path = None
     download_arrived = threading.Event()
     release_download = threading.Event()
@@ -66,6 +67,14 @@ def run_checks(optimize="Debug", backend_image=None):
                                                     + ', SignedHeaders=' + signed_headers + ', Signature=' + signature)
 
     class S3Mock(BaseHTTPRequestHandler):
+        def do_DELETE(self):
+            validate_signature(self, b'')
+            if not reject_delete:
+                objects.pop(self.path, None)
+            self.send_response(503 if reject_delete else 204)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+
         def do_PUT(self):
             body = self.rfile.read(int(self.headers["Content-Length"]))
             validate_signature(self, body)
@@ -160,6 +169,7 @@ def run_checks(optimize="Debug", backend_image=None):
         docker("exec", "-T", "postgres", "psql", "-U", "musica", "-d", "musica", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/009_track_hls.sql")
         assert [json.loads(line) for line in sql("SELECT row_to_json(t)::jsonb - 'hls_bucket' - 'hls_prefix' - 'hls_segment_count' FROM tracks t ORDER BY id").splitlines()] == [
             json.loads(line) for line in before_status_migration.splitlines()]
+        docker('exec', '-T', 'postgres', 'psql', '-U', 'musica', '-d', 'musica', '-v', 'ON_ERROR_STOP=1', '-f', '/migrations/010_track_file_deletions.sql')
         if not backend_image:
             subprocess.run(["zig", "build", "-Doptimize=" + optimize], cwd=BACKEND, check=True)
         with socket.socket() as listener:
@@ -175,10 +185,14 @@ def run_checks(optimize="Debug", backend_image=None):
             server = subprocess.Popen([str(executable)], cwd=BACKEND, env=env, stdout=log, stderr=log)
             base = f"http://127.0.0.1:{http_port}"
 
-        def request(method, path, body=None, token=None, expected=200, mime="application/json", raw=False, node=None):
+        def request(method, path, body=None, token=None, expected=200, mime="application/json", raw=False, node=None, cookie=None, origin=None):
             headers = {"Content-Type": mime}
             if token:
                 headers["Authorization"] = "Bearer " + token
+            if cookie:
+                headers['Cookie'] = 'musica_session=' + cookie
+            if origin:
+                headers['Origin'] = origin
             data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
             req = urllib.request.Request((node or base) + path, data=data, method=method, headers=headers)
             try:
@@ -191,7 +205,12 @@ def run_checks(optimize="Debug", backend_image=None):
                 if path != "/api/health":
                     assert response.headers.get("Cache-Control") == "no-store"
                 if raw and expected == 200:
-                    assert response.headers.get('Content-Type') == ('application/vnd.apple.mpegurl' if 'index.m3u8' in path else 'video/mp2t')
+                    assert response.headers.get('Content-Type') == ('image/png' if path.endswith('/image') else 'application/vnd.apple.mpegurl' if 'index.m3u8' in path else 'video/mp2t')
+                if path in ('/api/auth/register', '/api/auth/login') and expected in (200, 201):
+                    session = response.headers['Set-Cookie']
+                    assert 'HttpOnly' in session and 'SameSite=Strict' in session and 'Path=/api' in session
+                if path == '/api/auth/logout' and expected == 204:
+                    assert 'Max-Age=0' in response.headers['Set-Cookie']
                 return payload if raw else json.loads(payload) if payload else None
 
         for attempt in range(100):
@@ -210,6 +229,11 @@ def run_checks(optimize="Debug", backend_image=None):
         bob = request("POST", "/api/auth/register", {"username": "bob", "password": password}, expected=201)
         a, b = alice["token"], bob["token"]
         default = request("GET", "/api/users/me", token=a)["default_playlist_id"]
+        assert request('GET', '/api/users/me', cookie=a)['id'] == alice['user_id']
+        request('GET', '/api/users/me', cookie='invalid', expected=401)
+        request('POST', '/api/tracks', {'title': 'CSRF', 'artist': 'Denied'}, cookie=a, origin='http://evil.example', expected=403)
+        assert [p['id'] for p in request('GET', '/api/playlists', token=a)] == [default]
+        request('GET', '/api/playlists', expected=401)
         sql("ALTER TABLE playlists RENAME TO temporarily_unavailable_playlists")
         try:
             failure = request("GET", "/api/users/me", token=a, expected=503 if optimize == "Debug" else 500)
@@ -224,7 +248,7 @@ def run_checks(optimize="Debug", backend_image=None):
         request("POST", "/api/auth/login", {"username": "alice", "password": "incorrect-password"}, expected=401)
         request("POST", "/api/auth/login", {"username": "missing", "password": password}, expected=401)
         login = request("POST", "/api/auth/login", {"username": "alice", "password": password})
-        request("POST", "/api/auth/logout", token=login["token"], expected=204)
+        request("POST", "/api/auth/logout", cookie=login["token"], origin=base, expected=204)
         request("GET", "/api/users/me", token=login["token"], expected=401)
         sql(f"UPDATE sessions SET expires_at=now()-interval '1 second' WHERE user_id='{bob['user_id']}'")
         request("GET", "/api/users/me", token=b, expected=401)
@@ -271,6 +295,7 @@ def run_checks(optimize="Debug", backend_image=None):
         request("GET", path, token=b, expected=404)
         member = path + "/members/" + bob["user_id"]
         request("PUT", member, {"role": "viewer"}, token=a, expected=204)
+        assert next(p for p in request('GET', '/api/playlists', token=b) if p['id'] == playlist)['role'] == 'viewer'
         request("GET", path, token=b)
         request("PUT", path, {"title": "Denied"}, token=b, expected=404)
         request("PUT", path + "/tracks/" + track, token=b, expected=404)
@@ -285,7 +310,7 @@ def run_checks(optimize="Debug", backend_image=None):
         request("PUT", path + "/tracks/" + track, token=a, expected=204)
         request("PUT", path + "/tracks/" + track, token=a, expected=204)
         assert len(request("GET", path, token=b)["tracks"]) == 1
-        request("DELETE", f"/api/playlists/{default}/tracks/{track}", token=a, expected=400)
+        request("DELETE", f"/api/playlists/{default}/tracks/{track}", token=b, expected=404)
         request("PUT", f"/api/playlists/{default}", {"title": "Uploads", "visibility": "public"}, token=a, expected=400)
         count = sql("SELECT count(*) FROM tracks")
         request("POST", "/api/tracks", {"playlist_ids": [playlist, str(uuid.uuid4())], "title": "Rollback", "artist": "Artist"}, token=a, expected=404)
@@ -296,9 +321,12 @@ def run_checks(optimize="Debug", backend_image=None):
         image = request("PUT", path + "/image", cover, token=b, mime="image/png")
         assert objects["/uploads/" + image["image_key"]] == cover
         assert request("GET", path, token=a)["image_key"] == image["image_key"]
+        assert request('GET', path + '/image', cookie=a, raw=True) == cover
+        request('GET', path + '/image', expected=404)
         request("PUT", path + "/image", b"html", token=a, expected=400, mime="image/png")
         request("PUT", path, {"title": "Public", "visibility": "public"}, token=a, expected=204)
         request("GET", path)
+        assert request('GET', path + '/image', raw=True) == cover
         request("PUT", path, {"title": "Unlisted", "visibility": "unlisted"}, token=a, expected=204)
         request("GET", path, expected=404)
         link = request("POST", path + "/share-link", token=a)["path"]
@@ -329,6 +357,7 @@ def run_checks(optimize="Debug", backend_image=None):
             blocked_get_path = f'/uploads/tracks/{playable}/source'
             first_node = start_node(True)
             assert download_arrived.wait(15), 'worker did not download original'
+            request('DELETE', '/api/tracks/' + playable, token=a, expected=409)
             first_attempt = sql(f"SELECT attempt_id FROM track_hls_jobs WHERE track_id='{playable}'")
             assert request('POST', hls, token=a, expected=202)['preparation'] == 'processing'
             assert sql(f"SELECT attempt_id FROM track_hls_jobs WHERE track_id='{playable}'") == first_attempt
@@ -405,10 +434,53 @@ def run_checks(optimize="Debug", backend_image=None):
             else:
                 raise AssertionError('old worker did not reject its expired/replaced lease')
             assert sql(f"SELECT hls_prefix FROM tracks WHERE id='{playable}'") == prefix
+            assert request('GET', hls + '/index.m3u8', cookie=a, raw=True).decode() == manifest
+            request('DELETE', f'/api/playlists/{default}/tracks/{playable}', token=a, expected=204)
+            for _ in range(200):
+                if not any(key.startswith(f'/uploads/{prefix}/') or key == f'/uploads/tracks/{playable}/source' for key in objects):
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError('published HLS objects were not cleaned up')
+            assert sql(f"SELECT count(*) FROM track_hls_jobs WHERE track_id='{playable}'") == '0'
+            request('GET', hls + '/index.m3u8', token=a, expected=404)
             print('PASS: real MP3 -> AAC HLS, shared-node playback, expired-lease recovery, ACL, share revocation, conversion failure and retry.')
         else:
             assert request('POST', f'/api/tracks/{track}/hls', token=a, expected=202)['preparation'] == 'queued'
             request('GET', f'/api/tracks/{track}/hls/index.m3u8', token=a, expected=409)
+
+        # Unlinking an ordinary playlist retains the source; deleting from Uploads removes every link.
+        doomed = request('POST', '/api/tracks', {'title': 'Delete fixture', 'artist': 'Test', 'playlist_ids': [playlist]}, token=a, expected=201)['id']
+        source = f'/uploads/tracks/{doomed}/source'
+        request('PUT', f'/api/tracks/{doomed}/file', b'delete fixture', token=a, mime='audio/mpeg')
+        request('DELETE', '/api/tracks/' + doomed, token=b, expected=404)
+        request('DELETE', path + '/tracks/' + doomed, token=a, expected=204)
+        assert source in objects and sql(f"SELECT count(*) FROM tracks WHERE id='{doomed}'") == '1'
+        assert sql(f"SELECT count(*) FROM track_playlists WHERE track_id='{doomed}'") == '1'
+        request('PUT', path + '/tracks/' + doomed, token=a, expected=204)
+        reject_delete = True
+        request('DELETE', f'/api/playlists/{default}/tracks/{doomed}', token=a, expected=204)
+        assert sql(f"SELECT count(*) FROM tracks WHERE id='{doomed}'") == '0'
+        assert sql(f"SELECT count(*) FROM track_playlists WHERE track_id='{doomed}'") == '0'
+        for _ in range(100):
+            if sql('SELECT count(*) FROM track_file_deletions WHERE available_at>now()') != '0':
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError('S3 failure did not requeue cleanup')
+        assert source in objects
+        reject_delete = False
+        sql("UPDATE track_file_deletions SET available_at=now() WHERE state='queued'")
+        request('DELETE', '/api/tracks/' + empty_track, token=a, expected=204)
+        for _ in range(150):
+            if source not in objects and sql('SELECT count(*) FROM track_file_deletions') == '0':
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError('persistent cleanup did not finish after S3 recovered')
+        assert objects['/historical-uploads/tracks/stored-key'] == b'audio'
+        request('DELETE', '/api/tracks/' + doomed, token=a, expected=404)
+        print('PASS: cookie sessions, CSRF, playlist listing, cover reads, unlink versus global delete, durable S3 cleanup and retries.')
         assert request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:
             diagnostics = subprocess.check_output(['docker', 'logs', containers[0]], stderr=subprocess.STDOUT, text=True)

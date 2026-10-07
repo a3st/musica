@@ -77,3 +77,35 @@ pub const Upload = struct {
         self.conn.release();
     }
 };
+
+pub fn remove(pool: *pg.Pool, arena: std.mem.Allocator, user: []const u8, id: []const u8) !void {
+    const conn = pool.acquire() catch return error.DatabaseUnavailable;
+    defer conn.release();
+    conn.begin() catch return error.DatabaseUnavailable;
+    errdefer conn.rollback() catch {};
+    try removeWithConn(conn, arena, user, id);
+    conn.commit() catch return error.DatabaseUnavailable;
+}
+
+pub fn removeWithConn(conn: *pg.Conn, arena: std.mem.Allocator, user: []const u8, id: []const u8) !void {
+    const body = (sql.text(conn, arena, "SELECT json_build_object('bucket',storage_bucket,'key',object_key,'prefix',hls_prefix,'hls_bucket',hls_bucket,'segments',hls_segment_count)::text FROM tracks WHERE id=$1 AND owner_id=$2 FOR UPDATE NOWAIT", .{ id, user }) catch |err| {
+        if (err == error.LockUnavailable) return error.UploadInProgress;
+        return err;
+    }) orelse return error.TrackNotFound;
+    const job = sql.text(conn, arena, "SELECT (state='processing' AND lease_until>now())::text FROM track_hls_jobs WHERE track_id=$1 FOR UPDATE NOWAIT", .{id}) catch |err| {
+        if (err == error.LockUnavailable) return error.TrackPreparationInProgress;
+        return err;
+    };
+    if (job) |state| if (std.mem.eql(u8, state, "true")) return error.TrackPreparationInProgress;
+    const location = try std.json.parseFromSliceLeaky(struct { bucket: []const u8, key: []const u8, prefix: ?[]const u8, hls_bucket: ?[]const u8, segments: ?u32 }, arena, body, .{});
+    const source_keys = try std.json.Stringify.valueAlloc(arena, [_][]const u8{location.key}, .{});
+    _ = try sql.exec(conn, "INSERT INTO track_file_deletions (bucket,object_keys) VALUES ($1,$2::jsonb)", .{ location.bucket, source_keys });
+    if (location.prefix) |prefix| {
+        var keys: std.ArrayList([]const u8) = .empty;
+        for (0..location.segments.?) |index| try keys.append(arena, try std.fmt.allocPrint(arena, "{s}/segment-{d:0>6}.ts", .{ prefix, index }));
+        try keys.append(arena, try std.fmt.allocPrint(arena, "{s}/index.m3u8", .{prefix}));
+        const encoded = try std.json.Stringify.valueAlloc(arena, keys.items, .{});
+        _ = try sql.exec(conn, "INSERT INTO track_file_deletions (bucket,object_keys) VALUES ($1,$2::jsonb)", .{ location.hls_bucket.?, encoded });
+    }
+    _ = try sql.exec(conn, "DELETE FROM tracks WHERE id=$1", .{id});
+}
