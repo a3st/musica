@@ -18,6 +18,7 @@ pub fn run(app: *App) anyerror!void {
 
 fn cycle(app: *App, arena: std.mem.Allocator) !void {
     const task = (try service.claim(&app.db, arena)) orelse return;
+    std.log.info("S3 cleanup claimed job {s}, attempt {s}: {d} objects", .{ task.job.id, task.job.attempt_id.?, task.payload.keys.len });
     const Result = union(enum) { output: anyerror!void, lease: anyerror!void };
     var buffer: [2]Result = undefined;
     var select = std.Io.Select(Result).init(app.storage.io, &buffer);
@@ -32,17 +33,23 @@ fn cycle(app: *App, arena: std.mem.Allocator) !void {
     select.cancelDiscard();
     result catch |err| {
         if (err == error.Canceled) return err;
+        std.log.err("S3 cleanup job {s} failed: {s}", .{ task.job.id, @errorName(err) });
         try service.retry(&app.db, task);
         return err;
     };
-    try service.finish(&app.db, task);
+    service.finish(&app.db, task) catch |err| {
+        std.log.err("S3 cleanup job {s} completion failed: {s}", .{ task.job.id, @errorName(err) });
+        return err;
+    };
+    std.log.info("S3 cleanup completed job {s}", .{task.job.id});
 }
 
 fn deleteFiles(app: *App, task: Job) anyerror!void {
-    for (task.payload.keys) |key| {
+    for (task.payload.keys, 0..) |key, index| {
         var arena = std.heap.ArenaAllocator.init(app.storage.allocator);
         defer arena.deinit();
         try app.storage.deleteInBucket(arena.allocator(), task.payload.bucket, key);
+        std.log.debug("S3 cleanup job {s}: deleted object {d}/{d}", .{ task.job.id, index + 1, task.payload.keys.len });
     }
 }
 

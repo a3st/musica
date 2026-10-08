@@ -173,10 +173,7 @@ pub const S3 = struct {
     }
 
     fn send(self: *S3, url: []const u8, host: []const u8, mime: []const u8, data: []const u8, signed: Signed, timestamp: []const u8, method: std.http.Method) anyerror!void {
-        const result = try self.client.fetch(.{
-            .location = .{ .url = url },
-            .method = method,
-            .payload = if (method == .PUT) data else null,
+        var request = try self.client.request(method, try std.Uri.parse(url), .{
             .redirect_behavior = .unhandled,
             .keep_alive = true,
             .headers = .{
@@ -189,10 +186,36 @@ pub const S3 = struct {
                 .{ .name = "x-amz-date", .value = timestamp },
             },
         });
+        defer request.deinit();
+        // Do not drain a failed/canceled response while returning its connection to the pool.
+        errdefer if (request.connection) |connection| {
+            connection.closing = true;
+        };
+        if (method == .PUT) {
+            request.transfer_encoding = .{ .content_length = data.len };
+            var body = try request.sendBodyUnflushed(&.{});
+            try body.writer.writeAll(data);
+            try body.end();
+            try request.connection.?.flush();
+        } else {
+            try request.sendBodiless();
+        }
+        var response = try request.receiveHead(&.{});
+        const status = response.head.status;
+        if (status == .no_content) {
+            // Zig 0.16 fetch waits for EOF on MinIO's persistent 204 without Content-Length.
+            // A 204 ends at the headers, regardless of its framing headers.
+            response.head.transfer_encoding = .none;
+            response.head.content_length = 0;
+            request.response_transfer_encoding = .none;
+            request.response_content_length = 0;
+        }
+        const reader = response.reader(&.{});
+        _ = reader.discardRemaining() catch return response.bodyErr() orelse error.ReadFailed;
         const expected: std.http.Status = if (method == .PUT) .ok else .no_content;
-        if (result.status != expected) {
+        if (status != expected) {
             // Do not log storage responses or credentials.
-            std.log.warn("S3 {s} returned HTTP {d}", .{ if (method == .PUT) "PutObject" else "DeleteObject", @intFromEnum(result.status) });
+            std.log.warn("S3 {s} returned HTTP {d}", .{ if (method == .PUT) "PutObject" else "DeleteObject", @intFromEnum(status) });
             return error.StorageRejected;
         }
     }
@@ -413,6 +436,7 @@ fn persistentStorage(io: std.Io, server: *std.Io.net.Server) !void {
         "PUT /historical-uploads/tracks/test HTTP/1.1\r",
         "GET /uploads/tracks/test HTTP/1.1\r",
         "DELETE /historical-uploads/tracks/test HTTP/1.1\r",
+        "GET /uploads/tracks/test HTTP/1.1\r",
     }, 0..) |expected, index| {
         try std.testing.expectEqualStrings(expected, (try reader.interface.takeDelimiter('\n')) orelse return error.EndOfStream);
         while (true) {
@@ -425,16 +449,19 @@ fn persistentStorage(io: std.Io, server: *std.Io.net.Server) !void {
             try reader.interface.readSliceAll(&payload);
             try std.testing.expectEqualSlices(u8, &.{ 0, 255, 1, 2 }, &payload);
         }
-        if (index == 1) {
+        if (index == 1 or index == 3) {
             try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ntest");
+        } else if (index == 2) {
+            // MinIO sends a bodyless 204 without Content-Length and keeps the connection open.
+            try writer.interface.writeAll("HTTP/1.1 204 No Content\r\n\r\n");
         } else {
-            try writer.interface.print("HTTP/1.1 {s}\r\nContent-Length: 0\r\n\r\n", .{if (index == 2) "204 No Content" else "200 OK"});
+            try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         }
         try writer.interface.flush();
     }
 }
 
-test "S3 reuses a connection across methods and buckets without changing its default bucket" {
+test "S3 treats 204 without Content-Length as bodyless and reuses the connection" {
     const io = std.testing.io;
     const address: std.Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 0 } };
     var server = try address.listen(io, .{});
@@ -458,6 +485,7 @@ test "S3 reuses a connection across methods and buckets without changing its def
     try storage.putInBucket(arena.allocator(), "historical-uploads", "tracks/test", "audio/mpeg", &.{ 0, 255, 1, 2 });
     try std.testing.expectEqualStrings("test", try storage.get(arena.allocator(), "tracks/test", 4));
     try storage.deleteInBucket(arena.allocator(), "historical-uploads", "tracks/test");
+    try std.testing.expectEqualStrings("test", try storage.get(arena.allocator(), "tracks/test", 4));
     try std.testing.expectEqualStrings("uploads", storage.bucket);
     try future.await(io);
 }

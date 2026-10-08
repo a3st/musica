@@ -28,6 +28,7 @@ pub fn main(init: std.process.Init) !void {
     var server = try httpz.Server(*App).init(init.io, init.gpa, .{
         .address = .{ .ip = config.http_address },
         .request = .{ .max_body_size = config.max_upload_bytes },
+        .workers = .{ .large_buffer_count = 4, .large_buffer_size = 64 * 1024 },
         .thread_pool = .{ .count = 4 },
         .timeout = .{ .request = 120 },
     }, &app);

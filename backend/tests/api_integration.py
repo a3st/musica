@@ -80,7 +80,8 @@ def run_checks(optimize="Debug", backend_image=None):
             if not reject_delete:
                 objects.pop(self.path, None)
             self.send_response(503 if reject_delete else 204)
-            self.send_header('Content-Length', '0')
+            if reject_delete:
+                self.send_header('Content-Length', '0')
             self.end_headers()
 
         def do_PUT(self):
@@ -256,6 +257,8 @@ def run_checks(optimize="Debug", backend_image=None):
                 release_upload.set()
             result = uploading.result(timeout=10)
             assert result["status"] == "ready"
+            assert result['object_key'].rsplit('/', 1)[0] == f'tracks/{track}/source'
+            uuid.UUID(result['object_key'].rsplit('/', 1)[1])
             source_track = '/' + result['bucket'] + '/' + result['object_key']
         blocked_path = None
         assert objects[source_track] == b"audio"
@@ -269,7 +272,7 @@ def run_checks(optimize="Debug", backend_image=None):
         assert sql(f"SELECT storage_bucket || '/' || object_key FROM musica.tracks WHERE id='{preserved}' AND status='pending' AND content_type IS NULL AND size_bytes IS NULL AND uploaded_at IS NULL") == "historical-uploads/tracks/stored-key"
         reject_upload = False
         uploaded = request("PUT", f"/api/tracks/{preserved.upper()}/file", b"audio", token=a, mime="audio/mpeg")
-        assert uploaded["bucket"] == "historical-uploads" and uploaded["object_key"].startswith("tracks/stored-key/attempts/")
+        assert uploaded["bucket"] == "historical-uploads" and uploaded["object_key"].startswith("tracks/stored-key/")
         assert objects["/historical-uploads/" + uploaded["object_key"]] == b"audio"
         assert sql(f"SELECT storage_bucket || '/' || object_key FROM musica.tracks WHERE id='{preserved}' AND status='ready'") == "historical-uploads/" + uploaded["object_key"]
         # An expired uploader must never overwrite or publish a replacement attempt.
@@ -290,7 +293,7 @@ def run_checks(optimize="Debug", backend_image=None):
         replacement_path = "/" + replacement["bucket"] + "/" + replacement["object_key"]
         assert objects[replacement_path] == b"new"
         assert sql(f"SELECT object_key FROM musica.tracks WHERE id='{stale}' AND status='ready' ") == replacement["object_key"]
-        orphan = next(key for key in objects if key.startswith(f"/uploads/tracks/{stale}/source/attempts/") and key != replacement_path)
+        orphan = next(key for key in objects if key.startswith(f"/uploads/tracks/{stale}/source/") and key != replacement_path)
         sql("UPDATE public.jobs SET available_at=now()-interval '1 second' WHERE kind='delete_s3_objects' AND state='queued'")
         for _ in range(60):
             if orphan not in objects:
@@ -520,7 +523,10 @@ def run_checks(optimize="Debug", backend_image=None):
         disposable = request('POST', '/api/playlists', {'title': 'Delete me', 'visibility': 'unlisted'}, token=a, expected=201)['id']
         disposable_path = '/api/playlists/' + disposable
         kept_track = request('POST', '/api/tracks', {'title': 'Keep me', 'artist': 'Artist', 'playlist_ids': [disposable]}, token=a, expected=201)['id']
-        kept_file = request('PUT', f'/api/tracks/{kept_track}/file', b'keep-audio', token=a, mime='audio/mpeg')
+        # Bodies larger than the preallocated 64 KiB buffers must still upload intact.
+        kept_audio = b'keep-audio' * (128 * 1024 // len(b'keep-audio') + 1)
+        kept_file = request('PUT', f'/api/tracks/{kept_track}/file', kept_audio, token=a, mime='audio/mpeg')
+        assert sql(f"SELECT size_bytes FROM musica.tracks WHERE id='{kept_track}'") == str(len(kept_audio))
         kept_object = '/uploads/' + kept_file['object_key']
         disposable_member = disposable_path + '/members/' + bob['user_id']
         request('DELETE', disposable_path, expected=401)
@@ -575,10 +581,25 @@ def run_checks(optimize="Debug", backend_image=None):
             time.sleep(0.1)
         else:
             raise AssertionError('deleted playlist covers were not cleaned up')
-        assert objects[kept_object] == b'keep-audio'
+        assert objects[kept_object] == kept_audio
         empty_playlist = request('POST', '/api/playlists', {'title': 'Empty'}, token=a, expected=201)['id']
         request('DELETE', '/api/playlists/' + empty_playlist, token=a, expected=204)
         print('PASS: owner-only playlist deletion, protected Uploads, preserved tracks, revoked sharing, atomic cleanup and in-flight cover uploads.')
+        # A stopped worker leaves processing behind; the next worker must reclaim the expired lease.
+        recovery_prefix = 'cleanup-recovery/' + str(uuid.uuid4())
+        recovery_keys = [f'{recovery_prefix}/segment-{index:06d}.ts' for index in range(43)]
+        for key in recovery_keys:
+            objects['/uploads/' + key] = b'recover-deletion'
+        recovery_payload = json.dumps({'bucket': 'uploads', 'keys': recovery_keys})
+        recovered_cleanup = sql(f"INSERT INTO public.jobs (kind,state,attempt_id,attempts,lease_until,payload) VALUES ('delete_s3_objects','processing',gen_random_uuid(),1,now()-interval '1 second','{recovery_payload}'::jsonb) RETURNING id::text").splitlines()[0]
+        for _ in range(100):
+            if sql(f"SELECT count(*) FROM public.jobs WHERE id='{recovered_cleanup}'") == '0':
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError('expired S3 cleanup lease was not recovered')
+        assert all('/uploads/' + key not in objects for key in recovery_keys)
+        print('PASS: expired processing cleanup is reclaimed and all 43 objects are deleted.')
         print('PASS: cookie sessions, CSRF, playlist listing, cover reads, unlink versus global delete, durable S3 cleanup and retries.')
         assert request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:

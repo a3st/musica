@@ -48,7 +48,7 @@ pub fn upload(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const
         try conn.begin();
         errdefer conn.rollback() catch {};
         const original = try repository.lockForUpload(conn, arena, canonical_id, user);
-        const value: model.UploadLocation = .{ .bucket = original.bucket, .key = try std.fmt.allocPrint(arena, "{s}/attempts/{s}", .{ original.key, attempt }) };
+        const value: model.UploadLocation = .{ .bucket = original.bucket, .key = try std.fmt.allocPrint(arena, "{s}/{s}", .{ original.key, attempt }) };
         lease = jobs_repository.acquire(conn, arena, model.upload_job_kind, canonical_id, attempt, model.UploadPayload{ .track_id = canonical_id, .bucket = value.bucket, .key = value.key }, 120) catch |err| {
             if (err == error.LeaseLost) return error.UploadInProgress;
             return err;
