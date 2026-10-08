@@ -13,9 +13,10 @@ src/
   app.zig                     Общие зависимости и HTTP-ошибки
   helpers/
     api.zig                   HTTP-ошибки и разбор JSON
-    sql.zig                   Выполнение запросов и ошибки PostgreSQL
   infrastructure/
-    database.zig              Пул PostgreSQL
+    database.zig              Database/Connection, скрытый драйвер и пул PostgreSQL
+    repositories/             SQL auth, playlists, tracks, streaming
+    jobs/                     Общая модель Job и репозиторий jobs
     s3.zig                    S3-клиент для MinIO
   features/
     playlists/                Пользовательские плейлисты, доступ и обложки
@@ -24,23 +25,58 @@ src/
     tracks/
       routes.zig              HTTP-контракт
       model.zig               DTO и валидация
-      service.zig             Создание и загрузка трека
-      repository.zig          Параметризованные SQL-запросы
+      service.zig             Создание, загрузка и удаление трека; управление транзакциями
+      operations.zig          Переиспользуемое удаление внутри открытой транзакции
+      repository.zig          API хранения без драйвера и SQL
 migrations/                   SQL для ручного применения
 ```
 
 Новые ручки добавляйте в соответствующую фичу. Маршруты работают с HTTP,
-service координирует операции, repository работает с PostgreSQL,
-infrastructure содержит подключения к внешним сервисам.
+service координирует операции, feature/repository задаёт API хранения.
+Его реализация находится в infrastructure/repositories: здесь SQL-запросы.
+Сервисы получают и освобождают соединения, управляют begin/commit/rollback и
+объединяют операции репозиториев в одну транзакцию. Репозитории принимают Connection
+и не открывают транзакции. Структуры Upload и ImageUpload удалены.
+`tracks/operations.remove` проверяет владельца и активные задания, ставит файлы
+на очистку и удаляет запись трека. Вызывающий сервис управляет транзакцией:
+`tracks/service.remove` использует операцию для прямого удаления,
+`playlists/service.removeTrack` — для удаления из `Uploads`.
+Драйвер `pg`, его Pool/Conn, разбор SQLSTATE и чтение переменных PG* находятся
+только в infrastructure/database.zig. App содержит Database по значению и владеет
+её пулом: инициализация выполняется при создании App, освобождение — после остановки
+HTTP-сервера и фоновых задач. Сервисы заимствуют `&app.db`.
+Database — структура с init/deinit, владеющая `*pg.Pool`;
+Connection остаётся opaque-типом. Фичи используют методы Database и API репозиториев,
+не обращаясь к полю pool. Для замены БД
+меняются infrastructure-реализации, API фич и сервисы сохраняются.
+
+Общая очередь находится в `infrastructure/jobs/`: `model.zig` описывает `Job`,
+`Payload` и состояния, `repository.zig` выполняет запросы к единой таблице `jobs`.
+Job содержит id, строковый kind, необязательный dedupe_key, state, attempt_id,
+attempts, max_attempts, lease_until, available_at, created_at, updated_at и payload.
+Времена в модели — UTC в миллисекундах Unix. Payload — произвольный JSON;
+`Job.decodePayload(T, arena)` проверяет его по схеме обработчика во время выполнения.
+Таблица и репозиторий не содержат колонок или типов конкретных фич.
+
+Сервисы используют виды `prepare_hls`, `delete_s3_objects`, `upload_track`;
+их схемы payload находятся в моделях фич. Воркеры выбирают только свой kind.
+Общий репозиторий поддерживает постановку, получение, захват задания, продление
+аренды, завершение, повтор и отмену. Для синхронного PUT аренда берётся через acquire,
+для фоновых обработчиков — через claim с `FOR UPDATE SKIP LOCKED`.
+Изменение результата требует совпадения attempt_id и действующей аренды;
+срок действия проверяет часы PostgreSQL. Уникальная пара (kind, dedupe_key)
+предотвращает дублирование операций над одним ресурсом. Для независимых заданий
+dedupe_key не задаётся. max_attempts ограничивает повторы после ошибок обработчика;
+NULL позволяет повторять их без ограничения.
 `helpers/api.zig` задаёт общий перевод ошибок в HTTP-статусы и JSON,
 включая проверки ID, файлов, Content-Type/Content-Encoding и неизвестные маршруты.
 Маршруты возвращают ошибки через `api.failure`; статусы и JSON-коды задаются
 только в этом helper-е.
 Он также разбирает JSON-тела с лимитом размера. Для треков лимит остаётся
-16 KiB, для плейлистов и авторизации — 32 KiB. `helpers/sql.zig`
-выполняет параметризованные запросы, переводит ошибки PostgreSQL и копирует
-текстовые результаты в переданный allocator до освобождения буфера драйвера.
-Repositories сохраняют управление транзакциями и перевод общих SQL-ошибок
+16 KiB, для плейлистов и авторизации — 32 KiB. Infrastructure-репозитории
+вызывают Connection.text/exec напрямую. Infrastructure копирует текстовые
+результаты в переданный allocator до освобождения буфера драйвера.
+Infrastructure-репозитории сохраняют перевод общих ошибок
 в ошибки своей фичи, например блокировки трека в `upload_in_progress`.
 
 ## Запуск через Docker Compose
@@ -63,20 +99,11 @@ PostgreSQL доступен внутри сети Compose; для SQL испол
 docker compose up -d --build --wait postgres minio
 ```
 
-Примените миграции **вручную**, один раз, в указанном порядке. Если в `.env`
+Примените начальную миграцию **вручную**, один раз, к пустой БД. Если в `.env`
 изменены `PGUSER` или `PGDATABASE`, замените `musica` в командах:
 
 ```sh
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/001_create_albums.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/002_create_tracks.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/003_track_albums.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/004_users_and_albums.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f /migrations/005_pending_track_storage.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/006_albums_to_playlists.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/007_remove_playlist_artist.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/008_track_status_enum.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/009_track_hls.sql
-docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/010_track_file_deletions.sql
+docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/001_init.sql
 ```
 
 Создайте бакет вручную через MinIO client внутри контейнера:
@@ -121,7 +148,7 @@ backend запускается с UID/GID `10001`. Архив Zig проверя
 Нужны PostgreSQL 14+ и MinIO с доступным S3 API. Создайте БД `musica`,
 пользователя с правами на неё и приватный бакет **`uploads`** в MinIO.
 `uploads` — имя бакета без ведущего `/`, оригиналы новых треков размещаются
-по ключу `tracks/<uuid>/source`, HLS — под `tracks/<uuid>/hls/<attempt-id>/`.
+по ключу `tracks/<uuid>/source/attempts/<uuid-попытки>`, HLS — под `tracks/<uuid>/hls/<attempt-id>/`.
 Backend не создаёт бакет и не применяет миграции при запуске.
 
 Переменные описаны в [`.env.example`](.env.example). Файлы `.env` автоматически
@@ -172,88 +199,24 @@ Backend подключает пул из четырёх соединений Pos
 
 ## Ручные миграции
 
-Выполните файлы **один раз, по порядку** из каталога `backend/`:
+Схема объединена в `migrations/001_init.sql`, рассчитанный на пустую БД после
+сброса. Выполните его вручную один раз из каталога `backend/`:
 
 ```sh
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/001_create_albums.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/002_create_tracks.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/003_track_albums.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/004_users_and_albums.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -c "SET musica.pending_bucket = 'uploads'" -f migrations/005_pending_track_storage.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/006_albums_to_playlists.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/007_remove_playlist_artist.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/008_track_status_enum.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/009_track_hls.sql
-psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/010_track_file_deletions.sql
+psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/001_init.sql
 ```
 
-В командах указаны стандартные параметры: замените их при необходимости.
-Пароль `psql` запрашивает интерактивно либо читает из `PGPASSWORD`.
-Каждый файл выполняется в транзакции. Повторное выполнение не предусмотрено;
-учёт применённых миграций ведите вручную. `gen_random_uuid()` — встроенная
-функция PostgreSQL, отдельное расширение не требуется.
+Замените параметры подключения при необходимости. Пароль `psql` запрашивает
+интерактивно либо читает из `PGPASSWORD`. Файл создаёт актуальную схему целиком
+в одной транзакции: пользователей, сессии, плейлисты, связи, треки, enum статуса,
+триггер дефолтного `Uploads` и общую очередь `public.jobs` с индексами и ограничениями.
+Таблицы приложения, enum и функция триггера размещаются в `musica`, очередь —
+в `public.jobs`. SQL-запросы явно указывают схему и не зависят от `search_path`
+подключения.
 
-В существующей БД выполните только ещё не применённые миграции.
-`003_track_albums.sql` переносит существующие связи в `track_albums`,
-затем удаляет `tracks.album_id`. `004_users_and_albums.sql` добавляет
-пользователей, сессии, владельцев плейлистов и треков, участников и настройки доступа.
-`005_pending_track_storage.sql` сохраняет бакет и предполагаемый ключ для
-старых `pending`-треков. В команде `SET musica.pending_bucket` укажите
-**прежний** `S3_BUCKET`, куда могли загружаться их файлы. Если были разные
-бакеты, сначала выясните расположение объектов: старая схема его не сохраняла.
-Без этой настройки миграция при наличии `pending`-записей завершится ошибкой.
-Пути и метаданные существующих `ready`-треков сохраняются.
-`006_albums_to_playlists.sql` переименовывает `albums` в `playlists`,
-`track_albums` в `track_playlists`, `album_members` в `playlist_members`
-и поля связей `album_id` в `playlist_id`, обновляет триггер дефолтной коллекции.
-Исторические миграции не изменены. Выполните все ещё не применённые миграции
-перед запуском новой версии backend.
-ID, связи, настройки доступа, роли, токены ссылок и ключи обложек сохраняются.
-`007_remove_playlist_artist.sql` удаляет старое поле `playlists.artist`
-вместе с его ограничением. У плейлиста нет исполнителя; `tracks.artist`
-сохраняется. Значения удаляемого поля не переносятся.
-
-`008_track_status_enum.sql` меняет тип `tracks.status` с `text` на PostgreSQL
-enum `track_status`. В Zig используется `TrackStatus`. Значения и JSON API
-сохраняются: `pending` — ожидается исходный файл, `ready` — исходный файл
-загружен. Метаданные и пути существующих треков сохраняются. Миграция берёт
-эксклюзивную блокировку `tracks`; выполняйте её в окно обслуживания.
-
-`009_track_hls.sql` добавляет `streamed`, поля готового HLS и очередь
-`track_hls_jobs`. Исходные файлы и статусы старых треков сохраняются.
-Сначала примените миграции, затем запустите новую версию backend.
-
-`010_track_file_deletions.sql` добавляет постоянную очередь удаления объектов
-MinIO. Запись в неё создаётся в одной транзакции с удалением трека. Примените
-миграцию вручную перед обновлением backend; автоматически она не выполняется.
-
-API переименован: `/api/albums` → `/api/playlists`,
-`/api/shared/albums/:token` → `/api/shared/playlists/:token`,
-`album_ids` → `playlist_ids`, `default_album_id` → `default_playlist_id`.
-Старые URL больше не обслуживаются; для существующих ссылок замените
-`/api/shared/albums/` на `/api/shared/playlists/`, сохранив токен.
-Это переименование существующих коллекций: `Uploads` остаётся дефолтным
-приватным плейлистом, отдельная библиотека пользователя пока не выделена.
-Таблица `track_playlists` сохраняет одну связь на пару трек/плейлист;
-порядок и повторные вхождения через `playlist_items` пока не реализованы.
-Один трек имеет одну запись и один файл независимо от числа плейлистов;
-пары трек/плейлист уникальны. Удаление трека удаляет его связи, удаление
-плейлиста со связанными треками запрещено.
-
-Старые плейлисты и треки сохраняются с `owner_id = NULL` и недоступны через
-новый API. После регистрации нужного пользователя назначьте ему старые записи
-вручную. Например, замените UUID и выполните в транзакции:
-
-```sql
-BEGIN;
-UPDATE playlists SET owner_id = 'UUID-пользователя' WHERE id = 'UUID-старого-плейлиста';
-UPDATE tracks SET owner_id = 'UUID-пользователя' WHERE id = 'UUID-старого-трека';
-INSERT INTO track_playlists (track_id, playlist_id)
-SELECT t.id, a.id FROM tracks t JOIN playlists a ON a.owner_id = t.owner_id AND a.is_default
-WHERE t.id = 'UUID-старого-трека'
-ON CONFLICT DO NOTHING;
-COMMIT;
-```
+Старые миграции удалены. Повторное применение к уже созданной схеме не предусмотрено.
+Backend не сбрасывает БД и не применяет миграцию автоматически. Новые изменения
+схемы добавляйте следующими файлами с последовательными номерами.
 
 ## Пользователи и сессии
 
@@ -287,7 +250,7 @@ Bearer имеет приоритет, токены в query не использ�
 Для внешнего доступа используйте HTTPS и ограничение частоты запросов
 регистрации/входа на reverse proxy. Регистрация сейчас открыта; приглашения
 и восстановление пароля пока отсутствуют. Истёкшие сессии можно удалять вручную:
-`DELETE FROM sessions WHERE expires_at <= now();`.
+`DELETE FROM musica.sessions WHERE expires_at <= now();`.
 
 ## Плейлисты и доступ
 
@@ -312,6 +275,7 @@ Bearer имеет приоритет, токены в query не использ�
 | `GET /api/playlists` | Свои плейлисты и плейлисты с назначенной ролью: метаданные, `role`, `track_count`; сначала Uploads, затем название |
 | `GET /api/playlists/:id` | Метаданные и список треков |
 | `PUT /api/playlists/:id` | Заменить название, описание, теги и видимость; тело как при создании, ответ `204` |
+| `DELETE /api/playlists/:id` | Удалить обычный плейлист, его связи и доступ участников; только владелец (`204`) |
 | `PUT /api/playlists/:id/image` | Загрузить обложку байтами PNG/JPEG/WebP, до 5 MiB |
 | `GET /api/playlists/:id/image` | Получить обложку с проверкой доступа к плейлисту; без обложки `404` |
 | `PUT /api/playlists/:id/tracks/:track_id` | Добавить свой трек в плейлист, повторный запрос безопасен (`204`) |
@@ -322,6 +286,12 @@ Bearer имеет приоритет, токены в query не использ�
 | `POST /api/playlists/:id/share-link` | Создать или заменить ссылку для `unlisted`; ответ `{"path":"/api/shared/playlists/<token>"}` |
 | `DELETE /api/playlists/:id/share-link` | Отозвать ссылку (`204`) |
 | `GET /api/shared/playlists/:token` | Просмотр плейлиста по ссылке без входа |
+
+Удаление плейлиста сохраняет сами треки, в том числе в `Uploads`; обложка
+ставится на очистку через `delete_s3_objects` в той же транзакции.
+Ссылка доступа перестаёт работать. Дефолтный `Uploads` удалить нельзя:
+`409 default_playlist_protected`. Чужой или отсутствующий плейлист возвращает
+`404 not_found`; повторное удаление также возвращает `404`.
 
 `private` доступен владельцу и назначенным участникам. `public` доступен
 на просмотр без входа по ID. `unlisted` доступен владельцу, участникам и
@@ -335,13 +305,10 @@ Bearer имеет приоритет, токены в query не использ�
 удаление из него удаляет сам трек. Каждый новый трек добавляется туда,
 а `playlist_ids` задаёт дополнительные плейлисты с правами владельца или редактора.
 
-Обложки сохраняются в приватный бакет `uploads` под `playlists/<id>/<random>`.
-Старые обложки остаются по сохранённым ключам `albums/<id>/<random>`;
-миграция не перемещает объекты S3 и не меняет их ключи.
+Обложки сохраняются в приватный бакет из `S3_BUCKET` под `playlists/<id>/<random>`.
 
 Список `/api/playlists` требует входа; публичные плейлисты других пользователей
-без назначенной роли в него не включаются. В треках ответа есть `owner_id`,
-для исторических записей он может быть `null`.
+без назначенной роли в него не включаются. В треках ответа есть `owner_id`.
 
 Полное удаление трека атомарно удаляет его запись, все связи и задачу HLS.
 При активном PUT возвращается `409 upload_in_progress`, при действующей аренде
@@ -424,7 +391,7 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
   "id": "UUID-трека",
   "status": "ready",
   "bucket": "uploads",
-  "object_key": "tracks/UUID-трека/source",
+  "object_key": "tracks/UUID-трека/source/attempts/UUID-попытки",
   "size_bytes": 123456,
   "content_type": "audio/mpeg"
 }
@@ -455,27 +422,24 @@ Backend отправляет файл в MinIO как S3 PUT, затем сох�
 доступен. Текст SQL, параметры запросов и сообщения PostgreSQL не логируются.
 Ошибки валидации, авторизации, доступа и конфликты сохраняют свои коды.
 
-Загрузка держит `SELECT ... FOR UPDATE NOWAIT` до завершения S3 и коммита БД.
-После ошибки S3 транзакция откатывается, трек остаётся `pending`: PUT можно
-повторить. Для `ready` и `streamed` повторная загрузка запрещена.
-Загрузка использует сохранённые в БД бакет и ключ; смена `S3_BUCKET` влияет
-только на новые треки. В ответе PUT возвращается фактически использованный
-бакет, даже если он отличается от текущей конфигурации. Backend должен иметь
-доступ к прежнему бакету на текущем `S3_ENDPOINT`.
-Сохранённый путь также позволит удалять оставшиеся объекты при очистке
-заброшенных `pending`-треков; сама задача очистки пока не реализована.
+Перед запуском backend после сброса БД вручную примените `001_init.sql`.
+HLS, удаление объектов и аренды загрузки используют общую таблицу `public.jobs`.
 
-Схема `tracks/<id>/source` используется для новых записей. У ранее созданных
-треков сохранённый `object_key` не меняется: PUT и HLS читают путь из БД.
-Существующие объекты автоматически не перемещаются, миграция SQL не требуется.
-Для переноса старого оригинала сначала нужно скопировать объект в новый ключ,
-проверить копию и согласованно обновить `tracks.object_key`; одно изменение БД
-без копирования файла нарушит доступ к оригиналу.
+Каждая попытка пишет в `<сохранённый object_key>/attempts/<uuid-попытки>`.
+Для нового трека это `tracks/<id>/source/attempts/<uuid-попытки>`. Поздний ответ
+старой попытки не может перезаписать или опубликовать результат новой загрузки.
+Сохранённый бакет используется и для исторических треков; уже загруженные объекты
+не перемещаются. PUT возвращает фактические `bucket` и `object_key`, которые HLS
+читает из БД.
 
-PostgreSQL и S3 не образуют общую транзакцию. При успешном S3 PUT и ошибке
-обновления/коммита БД объект может остаться в бакете. Повторный PUT для
-`pending` использует тот же ключ и заменяет такой объект. При потере ответа
-коммита запись может уже стать `ready`; повторный PUT тогда вернёт `409`.
+До S3 PUT в `jobs` сохраняется отложенное задание `delete_s3_objects` на очистку.
+Успешная публикация отменяет его в той же транзакции, что обновляет трек.
+Если запрос завершился ошибкой, потерял аренду или процесс остановился, фоновый
+обработчик удалит объект незавершённой попытки после 120 секунд.
+Обложки загружаются аналогично: соединение освобождается перед S3, права редактора
+проверяются повторно при сохранении ссылки на изображение. Неопубликованные
+обложки также попадают в очистку. PostgreSQL и S3 не образуют общую транзакцию;
+при потере ответа коммита трек может уже стать `ready`, и повторный PUT вернёт `409`.
 
 `GET /api/health` сохраняет прежний контракт и проверяет доступность процесса,
 а не текущую готовность PostgreSQL или MinIO. Для воспроизведения доступны HLS-ручки ниже.
@@ -497,8 +461,10 @@ PostgreSQL и S3 не образуют общую транзакцию. При �
 POST не требует JSON-тела. Повторный POST для queued/processing идемпотентен,
 для failed ставит задачу заново. Для pending возвращается `409 track_not_uploaded`.
 До готовности GET манифеста/сегмента возвращает `409 hls_not_ready`.
-Состояние не начатой задачи — `preparation: null`. Номер отсутствующего
-сегмента возвращает `404`. При ошибке подготовки трек остаётся `ready`,
+Поле `preparation` использует общие состояния jobs: `queued`, `processing`,
+`completed`, `failed`; до создания задачи — `null`. При успешном завершении
+подготовки трек получает `status: "streamed"` и `preparation: "completed"`.
+Номер отсутствующего сегмента возвращает `404`. При ошибке подготовки трек остаётся `ready`,
 задача становится `failed`, подробности записываются только в лог.
 
 ```powershell
@@ -626,8 +592,9 @@ python backend/tests/api_integration.py --optimize ReleaseSafe --backend-image m
 ```
 
 Нужны Python 3, работающий Docker Compose и Zig 0.16. Скрипт создаёт отдельный
-случайно названный проект с пустой PostgreSQL, применяет миграции только в нём,
-проверяет перенос старых связей, сессии, права, дефолтные плейлисты, изменение
+случайно названный проект с пустой PostgreSQL, применяет `001_init.sql` только в нём,
+проверяет обращения к `public.jobs` при наличии одноимённой таблицы раньше в
+`search_path`, сессии, права, дефолтные плейлисты, изменение
 метаданных, обложки, шаринг и откат создания трека, затем удаляет тестовые
 контейнеры и volume. Пользовательская БД не затрагивается. S3 здесь заменён
 локальным HTTP-сервером; для проверки настоящего MinIO используйте ручной сценарий.
@@ -647,3 +614,10 @@ AAC-сегменты через ffprobe, работу двух воркеров 
 и [GetObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html)
 и [AWS Signature V4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html).
 Драйвер PostgreSQL: [pg.zig](https://github.com/karlseguin/pg.zig).
+
+S3 владеет одним HTTP-клиентом с пулом соединений для параллельных запросов.
+Настройки S3 и их проверка находятся в `infrastructure/s3.zig` (`Settings.load`).
+Общий `Config` содержит `s3: Settings`; `S3.init` принимает только настройки S3.
+После первого запроса экземпляр нельзя копировать. Бакет для конкретной операции
+передаётся через методы `putInBucket`, `getInBucket`, `deleteInBucket`.
+`S3.deinit()` вызывается после остановки HTTP-сервера и фоновых воркеров.

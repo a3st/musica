@@ -1,11 +1,11 @@
 const std = @import("std");
 const httpz = @import("httpz");
-const pg = @import("pg");
+const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
 const api = @import("helpers/api.zig");
 
 pub const App = struct {
-    db: *pg.Pool,
+    db: Database,
     storage: S3,
     max_upload_bytes: usize,
     ffmpeg_path: []const u8 = "ffmpeg",

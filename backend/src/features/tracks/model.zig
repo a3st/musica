@@ -1,6 +1,14 @@
 const std = @import("std");
+const Job = @import("../../infrastructure/jobs/model.zig").Job;
 
+pub const UploadLocation = struct { bucket: []const u8, key: []const u8 };
 pub const TrackStatus = enum { pending, ready, streamed };
+pub const upload_job_kind = "upload_track";
+pub const cleanup_job_kind = "delete_s3_objects";
+pub const UploadPayload = struct { track_id: []const u8, bucket: []const u8, key: []const u8 };
+pub const CleanupPayload = struct { bucket: []const u8, keys: []const []const u8 };
+pub const CleanupTask = struct { job: Job, payload: CleanupPayload };
+pub const TrackFiles = struct { bucket: []const u8, key: []const u8, prefix: ?[]const u8, hls_bucket: ?[]const u8, segments: ?u32 };
 
 pub const CreateTrack = struct {
     playlist_ids: []const []const u8 = &.{},

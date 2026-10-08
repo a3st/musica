@@ -3,6 +3,7 @@ const httpz = @import("httpz");
 const App = @import("../../app.zig").App;
 const model = @import("model.zig");
 const repository = @import("repository.zig");
+const database = @import("../../infrastructure/database.zig");
 const argon2 = std.crypto.pwhash.argon2;
 
 pub const Session = struct { user_id: []const u8, token: [64]u8 };
@@ -13,12 +14,12 @@ pub fn register(app: *App, arena: std.mem.Allocator, raw: model.Credentials) !Se
     const password_hash = try argon2.strHash(input.password, .{ .allocator = arena, .params = .{ .t = 2, .m = 19456, .p = 1 }, .mode = .argon2id }, &buffer, app.storage.io);
     const token = try model.newToken(app.storage.io);
     const hash = model.tokenHash(&token);
-    return .{ .user_id = try repository.register(app.db, arena, input.username, password_hash, &hash), .token = token };
+    return .{ .user_id = try registerRecord(&app.db, arena, input.username, password_hash, &hash), .token = token };
 }
 
 pub fn login(app: *App, arena: std.mem.Allocator, raw: model.Credentials) !Session {
     const input = try model.validate(raw);
-    const stored = try repository.credentials(app.db, arena, input.username);
+    const stored = try credentials(&app.db, arena, input.username);
     // Run the same KDF for absent usernames to avoid a cheap enumeration path.
     var buffer: [256]u8 = undefined;
     const user = stored orelse {
@@ -31,7 +32,7 @@ pub fn login(app: *App, arena: std.mem.Allocator, raw: model.Credentials) !Sessi
     };
     const token = try model.newToken(app.storage.io);
     const token_hash = model.tokenHash(&token);
-    try repository.session(app.db, user.id, &token_hash);
+    try session(&app.db, user.id, &token_hash);
     return .{ .user_id = user.id, .token = token };
 }
 
@@ -50,7 +51,7 @@ pub fn optionalUser(app: *App, req: *httpz.Request, arena: std.mem.Allocator) !?
 
 pub fn requireUser(app: *App, req: *httpz.Request, arena: std.mem.Allocator) ![]const u8 {
     const hash = model.tokenHash(try requestToken(req));
-    return repository.resolve(app.db, arena, &hash);
+    return resolve(&app.db, arena, &hash);
 }
 
 pub fn requestToken(req: *httpz.Request) ![]const u8 {
@@ -89,4 +90,48 @@ test "Argon2id hashes verify and reject a wrong password" {
     const hash = try argon2.strHash("test-password-123", .{ .allocator = std.testing.allocator, .params = .{ .t = 2, .m = 19456, .p = 1 }, .mode = .argon2id }, &buffer, std.testing.io);
     try argon2.strVerify(hash, "test-password-123", .{ .allocator = std.testing.allocator }, std.testing.io);
     try std.testing.expectError(error.PasswordVerificationFailed, argon2.strVerify(hash, "wrong-password", .{ .allocator = std.testing.allocator }, std.testing.io));
+}
+
+fn registerRecord(db: *database.Database, arena: std.mem.Allocator, username: []const u8, password_hash: []const u8, token_hash: []const u8) ![]const u8 {
+    const conn = try db.acquire();
+    defer conn.release();
+    try conn.begin();
+    errdefer conn.rollback() catch {};
+    const result = try repository.register(conn, arena, username, password_hash);
+    try repository.session(conn, result, token_hash);
+    try conn.commit();
+    return result;
+}
+
+fn credentials(db: *database.Database, arena: std.mem.Allocator, username: []const u8) !?model.Login {
+    const conn = try db.acquire();
+    defer conn.release();
+    const result = try repository.credentials(conn, arena, username);
+    return result;
+}
+
+fn session(db: *database.Database, user_id: []const u8, hash: []const u8) !void {
+    const conn = try db.acquire();
+    defer conn.release();
+    try repository.session(conn, user_id, hash);
+}
+
+fn resolve(db: *database.Database, arena: std.mem.Allocator, hash: []const u8) ![]const u8 {
+    const conn = try db.acquire();
+    defer conn.release();
+    const result = try repository.resolve(conn, arena, hash);
+    return result;
+}
+
+pub fn logout(db: *database.Database, hash: []const u8) !void {
+    const conn = try db.acquire();
+    defer conn.release();
+    try repository.logout(conn, hash);
+}
+
+pub fn me(db: *database.Database, arena: std.mem.Allocator, id: []const u8) ![]const u8 {
+    const conn = try db.acquire();
+    defer conn.release();
+    const result = try repository.me(conn, arena, id);
+    return result;
 }

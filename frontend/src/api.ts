@@ -3,7 +3,7 @@ export interface Track { id: string; title: string; artist: string; status: Trac
 export interface PlaylistSummary { id: string; owner_id: string; title: string; description: string; visibility: 'private' | 'public' | 'unlisted'; is_default: boolean; image_key: string | null; role: 'owner' | 'editor' | 'viewer'; track_count: number }
 export interface Playlist { id: string; owner_id: string; title: string; description: string; visibility: PlaylistSummary['visibility']; is_default: boolean; image_key: string | null; tracks: Track[] }
 export interface User { id: string; username: string; default_playlist_id: string }
-export interface HlsState { status: TrackStatus; preparation: 'queued' | 'processing' | 'ready' | 'failed' | null }
+export interface HlsState { status: TrackStatus; preparation: 'queued' | 'processing' | 'completed' | 'failed' | null }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
@@ -66,6 +66,7 @@ export const api = {
   async createTrack(title: string, artist: string, playlistIds: string[]): Promise<string> {
     return uuid(record(await request('/tracks', { method: 'POST', ...json({ title, artist, playlist_ids: playlistIds }) })).id);
   },
+  async removePlaylist(id: string): Promise<void> { await request('/playlists/' + id, { method: 'DELETE' }); },
   async prepare(id: string): Promise<HlsState> { return hlsState(await request(`/tracks/${id}/hls`, { method: 'POST' })); },
   async preparation(id: string): Promise<HlsState> { return hlsState(await request(`/tracks/${id}/hls/status`)); },
   async removeTrack(id: string): Promise<void> { await request('/tracks/' + id, { method: 'DELETE' }); },
@@ -74,7 +75,7 @@ export const api = {
 };
 function hlsState(data: unknown): HlsState {
   const r = record(data);
-  return { status: choice(r.status, ['pending', 'ready', 'streamed']), preparation: r.preparation === null ? null : choice(r.preparation, ['queued', 'processing', 'ready', 'failed'] as const) };
+  return { status: choice(r.status, ['pending', 'ready', 'streamed']), preparation: r.preparation === null ? null : choice(r.preparation, ['queued', 'processing', 'completed', 'failed'] as const) };
 }
 export function uploadFile(id: string, file: File, progress: (percent: number) => void, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

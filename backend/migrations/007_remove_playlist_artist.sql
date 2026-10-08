@@ -1,5 +1,0 @@
-BEGIN;
-
-ALTER TABLE playlists DROP COLUMN artist;
-
-COMMIT;

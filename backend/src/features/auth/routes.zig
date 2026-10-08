@@ -4,7 +4,6 @@ const App = @import("../../app.zig").App;
 const api = @import("../../helpers/api.zig");
 const model = @import("model.zig");
 const service = @import("service.zig");
-const repository = @import("repository.zig");
 
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/auth/register", signup, .{});
@@ -33,7 +32,7 @@ fn login(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 fn logout(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     _ = service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     const hash = model.tokenHash(try service.requestToken(req));
-    repository.logout(app.db, &hash) catch |err| return api.failure(res, err);
+    service.logout(&app.db, &hash) catch |err| return api.failure(res, err);
     res.status = 204;
     res.header("Cache-Control", "no-store");
     try sessionCookie(app, res, "", true);
@@ -46,5 +45,5 @@ fn sessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: boo
 
 fn me(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const user = service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    api.jsonText(res, repository.me(app.db, res.arena, user) catch |err| return api.failure(res, err));
+    api.jsonText(res, service.me(&app.db, res.arena, user) catch |err| return api.failure(res, err));
 }

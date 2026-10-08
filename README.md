@@ -17,7 +17,7 @@ frontend/             TypeScript + Vite, PWA
 backend/              Zig 0.16.0 + http.zig
   src/main.zig        Инициализация и регистрация фич
   src/features/       auth, users, playlists, tracks, streaming, health
-  src/infrastructure/ PostgreSQL и S3/MinIO
+  src/infrastructure/ PostgreSQL, S3/MinIO и общая очередь jobs
   migrations/         SQL-миграции для ручного выполнения
   build.zig           Сборка и запуск
   build.zig.zon       Закреплённые зависимости
@@ -69,8 +69,8 @@ Backend слушает только loopback-интерфейс.
 `Uploads`. Кнопка «Загрузить треки» доступна на ПК; после загрузки запускается
 подготовка HLS. Удаление из `Uploads` удаляет трек из всей медиатеки и MinIO,
 из остальных плейлистов — только связь. Оба действия требуют подтверждения.
-Перед обновлением backend вручную примените новую миграцию
-`010_track_file_deletions.sql` для очереди очистки файлов.
+После сброса БД вручную примените `backend/migrations/001_init.sql`.
+Она создаёт таблицы приложения в схеме `musica`, а общую очередь — в `public.jobs`.
 
 Проверка API:
 

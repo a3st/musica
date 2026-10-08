@@ -1,21 +1,18 @@
 const std = @import("std");
-const tracks = @import("../tracks/model.zig");
+const tracks_model = @import("../tracks/model.zig");
+const jobs_model = @import("../../infrastructure/jobs/model.zig");
 
-pub const JobState = enum { queued, processing, ready, failed };
 pub const State = struct {
-    status: tracks.TrackStatus,
-    preparation: ?JobState,
+    status: tracks_model.TrackStatus,
+    preparation: ?jobs_model.State,
     bucket: ?[]const u8,
     prefix: ?[]const u8,
     segments: ?u32,
 };
-pub const Job = struct {
-    id: []const u8,
-    attempt: []const u8,
-    bucket: []const u8,
-    key: []const u8,
-    size: usize,
-};
+pub const preparation_job_kind = "prepare_hls";
+pub const PreparationPayload = struct { track_id: []const u8, bucket: []const u8, key: []const u8, size: usize };
+pub const PreparationState = struct { status: tracks_model.TrackStatus, payload: PreparationPayload };
+pub const PreparationTask = struct { job: jobs_model.Job, payload: PreparationPayload };
 pub const max_segments = 10000;
 pub const max_manifest_bytes = 1024 * 1024;
 pub const max_segment_bytes = 2 * 1024 * 1024;

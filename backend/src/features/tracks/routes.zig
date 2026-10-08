@@ -3,7 +3,7 @@ const httpz = @import("httpz");
 const App = @import("../../app.zig").App;
 const model = @import("model.zig");
 const service = @import("service.zig");
-const auth = @import("../auth/service.zig");
+const auth_service = @import("../auth/service.zig");
 const api = @import("../../helpers/api.zig");
 
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
@@ -15,7 +15,7 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 fn remove(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const id = req.param("id") orelse return api.failure(res, error.InvalidTrackId);
     if (!model.validId(id)) return api.failure(res, error.InvalidTrackId);
-    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     service.remove(app, res.arena, user, id) catch |err| return api.failure(res, err);
     res.status = 204;
     res.header("Cache-Control", "no-store");
@@ -24,7 +24,7 @@ fn remove(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const input = (try api.jsonOpts(req, res, model.CreateTrack, .{ .max_bytes = 16 * 1024 })) orelse return;
     _ = model.validateCreate(input) catch |err| return api.failure(res, err);
-    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     const id = service.create(app, res.arena, user, input) catch |err| return api.failure(res, err);
     res.status = 201;
     res.header("Cache-Control", "no-store");
@@ -42,7 +42,7 @@ fn upload(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const data = req.body() orelse return api.failure(res, error.EmptyFile);
     if (data.len == 0) return api.failure(res, error.EmptyFile);
     if (data.len > app.max_upload_bytes) return api.failure(res, error.FileTooLarge);
-    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     const location = service.upload(app, res.arena, user, id, mime, data) catch |err| return api.failure(res, err);
     res.header("Cache-Control", "no-store");
     try res.json(.{

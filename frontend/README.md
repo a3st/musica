@@ -5,9 +5,8 @@ TypeScript strict, Vite, DOM API, PWA. Интерфейс работает с н
 
 ## Запуск
 
-Сначала настройте backend, PostgreSQL, MinIO и выполните миграции вручную
-по [инструкции backend](../backend/README.md). Нужна также новая миграция
-`010_track_file_deletions.sql`. Для воспроизведения включите HLS-воркер
+Сначала настройте backend, PostgreSQL, MinIO и вручную примените `001_init.sql`
+к пустой БД по [инструкции backend](../backend/README.md). Для воспроизведения включите HLS-воркер
 и установите FFmpeg на backend либо используйте Docker-образ.
 
 Из `frontend/`:

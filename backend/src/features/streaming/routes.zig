@@ -2,9 +2,9 @@ const std = @import("std");
 const httpz = @import("httpz");
 const App = @import("../../app.zig").App;
 const api = @import("../../helpers/api.zig");
-const auth = @import("../auth/service.zig");
+const auth_service = @import("../auth/service.zig");
 const auth_model = @import("../auth/model.zig");
-const tracks = @import("../tracks/model.zig");
+const tracks_model = @import("../tracks/model.zig");
 const model = @import("model.zig");
 const service = @import("service.zig");
 
@@ -17,7 +17,7 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 
 fn trackId(req: *httpz.Request) ![]const u8 {
     const id = req.param("id") orelse return error.InvalidTrackId;
-    if (!tracks.validId(id)) return error.InvalidTrackId;
+    if (!tracks_model.validId(id)) return error.InvalidTrackId;
     return id;
 }
 
@@ -30,16 +30,16 @@ fn shareToken(req: *httpz.Request) !?[]const u8 {
 
 fn accessible(app: *App, req: *httpz.Request, res: *httpz.Response) !model.State {
     const id = try trackId(req);
-    const user = try auth.optionalUser(app, req, res.arena);
+    const user = try auth_service.optionalUser(app, req, res.arena);
     const token = try shareToken(req);
     const hash = if (token) |value| auth_model.tokenHash(value) else null;
-    return service.read(app.db, res.arena, id, user, if (hash) |*value| value else null);
+    return service.read(&app.db, res.arena, id, user, if (hash) |*value| value else null);
 }
 
 fn prepare(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const id = trackId(req) catch |err| return api.failure(res, err);
-    const user = auth.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    const state = service.enqueue(app.db, res.arena, id, user) catch |err| return api.failure(res, err);
+    const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const state = service.enqueue(&app.db, res.arena, id, user) catch |err| return api.failure(res, err);
     res.status = if (state.status == .streamed) 200 else 202;
     res.header("Cache-Control", "no-store");
     try res.json(.{ .status = state.status, .preparation = state.preparation }, .{});

@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const Credentials = struct { username: []const u8, password: []const u8 };
+pub const Login = struct { id: []const u8, password_hash: []const u8 };
 
 pub fn validate(input: Credentials) !Credentials {
     if (input.username.len < 3 or input.username.len > 64 or input.password.len < 12 or input.password.len > 1024)
