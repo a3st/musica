@@ -20,7 +20,7 @@ const browser = await chromium.launch({ executablePath, headless: true });
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const user = { id: id(1), username: 'music_lover', default_playlist_id: id(2) };
 const metadata = (n, title, isDefault = false) => ({ id: id(n), owner_id: user.id, title, description: '',
-  visibility: 'private', is_default: isDefault, image_key: null, role: 'owner', track_count: 0 });
+  tags: ['ambient'], visibility: 'private', is_default: isDefault, image_key: null, role: 'owner', track_count: 0 });
 const tracks = [
   { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed' },
   { id: id(11), owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed' },
@@ -33,7 +33,10 @@ let authenticated = true;
 let nextId = 20;
 let spotifyImport = null;
 let spotifyFailed = true;
+let failImage = false;
+const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=', 'base64');
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
+await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
@@ -45,6 +48,8 @@ await page.route('**/api/**', async (route) => {
   if (path === '/api/auth/logout') { authenticated = false; return route.fulfill({ status: 204 }); }
   if (method !== 'GET') mutations.push({ method, path, body: request.headers()['content-type']?.includes('application/json') ? request.postDataJSON() : request.postData() });
   if (path === '/api/playlists' && method === 'GET') return json(playlists.map((p) => ({ ...p, track_count: members.get(p.id).length })));
+  if (path === `/api/playlists/${id(3)}/share-link` && method === 'POST') return json({ path: '/api/shared/playlists/' + 'a'.repeat(64) });
+  if (path === '/api/shared/playlists/' + 'a'.repeat(64)) return json({ ...playlists.find(p => p.id === id(3)), tracks: members.get(id(3)) });
   if (path === '/api/spotify/import' && method === 'POST') {
     const input = request.postDataJSON();
     assert.equal(input.playlists[0].title, 'Spotify mix');
@@ -63,7 +68,17 @@ await page.route('**/api/**', async (route) => {
   if (path === '/api/playlists' && method === 'POST') {
     const p = { ...metadata(nextId++, ''), ...request.postDataJSON() }; playlists.push(p); members.set(p.id, []); return json({ id: p.id }, 201);
   }
-  let match = path.match(/^\/api\/playlists\/([^/]+)$/);
+  let match = path.match(/^\/api\/playlists\/([^/]+)\/image$/);
+  if (match) {
+    if (method === 'GET') return route.fulfill({ contentType: 'image/png', body: imageBytes });
+    if (failImage) { failImage = false; return json({ error: 'internal_error' }, 500); }
+    const p = playlists.find(p => p.id === match[1]); p.image_key = `playlists/${p.id}/cover`;
+    return json({ image_key: p.image_key, bucket: 'uploads' });
+  }
+  match = path.match(/^\/api\/playlists\/([^/]+)$/);
+  if (match && method === 'PUT') { Object.assign(playlists.find(p => p.id === match[1]), request.postDataJSON()); return route.fulfill({ status: 204 }); }
+  if (match && method === 'DELETE') { playlists = playlists.filter(p => p.id !== match[1]); members.delete(match[1]); return route.fulfill({ status: 204 }); }
+
   if (match && method === 'GET') return json({ ...playlists.find((p) => p.id === match[1]), tracks: members.get(match[1]) });
   match = path.match(/^\/api\/playlists\/([^/]+)\/tracks\/([^/]+)$/);
   if (match) {
@@ -88,19 +103,180 @@ await page.route('**/api/**', async (route) => {
   }
   return json({ error: 'not_found' }, 404);
 });
+const toggleTheme = async () => { await page.locator('#profile-toggle').click(); await page.locator('#theme-toggle').click(); await page.keyboard.press('Escape'); };
+const openSpotify = async () => { if (await page.locator('.sidebar').isVisible()) await page.locator('.topbar [data-action=upload]').click(); else { await page.locator('#open-library').click(); await page.locator('#library-dialog [data-action=upload]').click(); } await page.locator('#upload-dialog [data-action=spotify-import]').click(); };
 const overflow = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'horizontal overflow');
 try {
   await page.goto(base); await page.locator('h1').filter({ hasText: 'Uploads' }).waitFor();
   await overflow(); assert.equal(await page.locator('.track-row').count(), 3);
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
+  assert.equal(await page.locator('.now-playing').isVisible(), false, 'no placeholder track when nothing is selected');
+  assert.equal(await page.locator('#refresh').count(), 0);
+  assert.equal(await page.locator('#playlist-menu-toggle').count(), 0);
+  assert.equal(await page.locator('.collection-toolbar button').count(), 2);
+  assert.equal(await page.locator('.track-favorite').count(), 0);
+  assert.equal(await page.locator('.collection-toolbar .round-button[disabled]').count(), 0);
+  assert.equal(await page.locator('.track-row .track-length').first().textContent(), '—:—');
+  assert.equal(await page.locator('.sidebar').evaluate(el => getComputedStyle(el).borderTopLeftRadius), '22px');
+  await page.locator('#mute').click(); assert.equal(await page.locator('#mute').getAttribute('aria-pressed'), 'true');
+  await page.locator('#mute').click(); assert.equal(await page.locator('#mute').getAttribute('aria-pressed'), 'false');
+  await page.locator('.sidebar [data-playlist]').first().click({ button: 'right' });
+  assert.equal(await page.locator('#delete-playlist').isDisabled(), true, 'Uploads cannot be deleted');
+  assert.equal(await page.locator('#edit-playlist').isDisabled(), true, 'Uploads settings cannot be edited');
+  assert.equal(await page.locator('#share-playlist').isDisabled(), true, 'Uploads cannot be shared');
+  assert.equal(await page.locator('#context-menu button svg').count(), await page.locator('#context-menu button').count(), 'each menu action has an icon');
+  assert.ok(await page.locator('#context-menu [role=separator]').count() > 0, 'menu actions are grouped');
+  await page.keyboard.press('Escape');
+
+  await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click({ button: 'right' });
+  assert.equal(await page.locator('#share-playlist').isDisabled(), true, 'sharing does not change private access');
+  await page.keyboard.press('Escape');
+  playlists.find(p => p.id === id(3)).visibility = 'unlisted';
+  await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click({ button: 'right' });
+  await page.locator('#share-playlist').click();
+  await page.waitForFunction(() => document.querySelector('#toast').textContent === 'Ссылка скопирована');
+  const sharedUrl = await page.evaluate(() => navigator.clipboard.readText());
+  assert.equal(new URL(sharedUrl).hash, '#share=' + 'a'.repeat(64));
+  await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click({ button: 'right' }); await page.locator('#share-playlist').click();
+  await page.waitForFunction(() => document.querySelector('#context-menu').hidden);
+  assert.equal(mutations.filter(m => m.path.endsWith('/share-link')).length, 1, 'repeat copying keeps the same token');
+  authenticated = false; await page.goto(sharedUrl);
+  await page.getByRole('heading', { name: 'Тихие вечера', exact: true }).waitFor();
+  assert.equal(await page.locator('#auth-dialog').getAttribute('open'), null, 'shared link opens without login');
+  const sharedManifest = page.waitForRequest(request => request.url().includes('/hls/index.m3u8?share_token='));
+  await page.locator('#playlist-play').click();
+  assert.equal(new URL((await sharedManifest).url()).searchParams.get('share_token'), 'a'.repeat(64));
+  authenticated = true; playlists.find(p => p.id === id(3)).visibility = 'public';
+  await page.goto(base); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click({ button: 'right' }); await page.locator('#share-playlist').click();
+  await page.waitForFunction(() => document.querySelector('#toast').textContent === 'Ссылка скопирована');
+  const publicUrl = await page.evaluate(() => navigator.clipboard.readText());
+  assert.equal(new URL(publicUrl).searchParams.get('playlist'), id(3));
+  authenticated = false; await page.goto(publicUrl);
+  await page.getByRole('heading', { name: 'Тихие вечера', exact: true }).waitFor();
+  assert.equal(await page.locator('#auth-dialog').getAttribute('open'), null);
+  authenticated = true; playlists.find(p => p.id === id(3)).visibility = 'private';
+  await page.goto(base); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+
+  await page.locator('#volume').fill('35');
+  assert.equal(await page.locator('#volume').evaluate(el => el.style.getPropertyValue('--progress')), '35%');
+  assert.match(await page.locator('#volume').evaluate(el => getComputedStyle(el).backgroundImage), /35%/);
+  assert.match(await page.locator('.hero-facts').textContent(), /3 треков, — ч/);
+  assert.equal(await page.evaluate(() => {
+    const top = document.querySelector('.topbar').getBoundingClientRect();
+    const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+    const main = document.querySelector('#collection').getBoundingClientRect();
+    const bottom = document.querySelector('.player').getBoundingClientRect();
+    return top.left === 8 && top.right === innerWidth - 8 && sidebar.top === top.bottom + 8 && main.top === sidebar.top && Math.abs(sidebar.bottom - (bottom.top - 8)) < 2 && main.bottom === sidebar.bottom;
+  }), true, 'full-width header and player frame the middle panels: ' + await page.evaluate(() => JSON.stringify(['.topbar', '.sidebar', '#collection', '.player'].map(selector => ({ selector, rect: document.querySelector(selector).getBoundingClientRect().toJSON() })))));
+  assert.equal(await page.locator('.topbar .brand').count(), 1);
+  assert.equal(await page.locator('.sidebar .brand').count(), 0);
+  assert.equal(await page.locator('.topbar .profile-info').count(), 0);
+  const handle = page.locator('#sidebar-resize');
+  const box = await handle.boundingBox(); await page.mouse.move(box.x + box.width / 2, 200); await page.mouse.down(); await page.mouse.move(340, 200); await page.mouse.up();
+  assert.equal(await handle.getAttribute('aria-valuenow'), '340'); await overflow();
+  await handle.focus(); await page.keyboard.press('Home');
+  assert.equal(await handle.getAttribute('aria-valuenow'), '104');
+  assert.ok((await page.locator('.sidebar').boundingBox()).width >= 88, 'collapsed sidebar leaves space around covers');
+  assert.equal(await page.locator('.sidebar .nav-cover').first().isVisible(), true);
+  assert.equal(await page.locator('.sidebar .playlist-link strong').first().isVisible(), false);
+  await page.screenshot({ path: '../backend/.zig-cache/ui-sidebar-collapsed.png' });
+  await page.keyboard.press('End'); for (let n=0;n<6;n++) await page.keyboard.press('ArrowLeft');
+  assert.equal(await handle.getAttribute('aria-valuenow'), '244');
+  await page.setViewportSize({ width: 1440, height: 400 });
+  const thumb = page.locator('.collection-scrollbar-thumb'); await thumb.waitFor();
+  assert.ok((await thumb.boundingBox()).height <= 80, 'compact scrollbar thumb');
+  await thumb.focus(); await page.keyboard.press('End');
+  await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
+  await page.keyboard.press('Home');
+  await page.waitForFunction(() => document.querySelector('#collection').scrollTop === 0);
+  const railBox = await page.locator('.collection-scrollbar').boundingBox(); const thumbBox = await thumb.boundingBox();
+  await page.mouse.move(thumbBox.x + 3, thumbBox.y + thumbBox.height / 2); await page.mouse.down(); await page.mouse.move(railBox.x + 3, railBox.y + railBox.height); await page.mouse.up();
+  await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
+  await thumb.focus(); await page.keyboard.press('Home');
+  const navBox = await page.locator('.sidebar .playlist-nav').boundingBox();
+  await page.mouse.move(navBox.x + navBox.width / 2, navBox.y + navBox.height / 2); await page.mouse.wheel(0, 250);
+  await page.waitForFunction(() => document.querySelector('.sidebar .playlist-nav').scrollTop > 0);
+  await page.waitForFunction(() => !document.querySelector('.sidebar .playlist-nav').classList.contains('scrolling'));
+  assert.equal(await page.locator('.sidebar .playlist-nav').evaluate(el => getComputedStyle(el).scrollbarColor), 'rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)', 'scrollbar disappears when scrolling stops');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('#profile-toggle').click(); assert.equal(await page.locator('#profile-menu').isVisible(), true);
+  await page.locator('#language').selectOption('en-US');
+  assert.equal(await page.locator('html').getAttribute('lang'), 'en-US');
+  assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Search for songs or artists…');
+  assert.equal(await page.locator('.sidebar .library-heading>span').textContent(), 'PLAYLISTS');
+  assert.match(await page.locator('.hero-facts').textContent(), /3 tracks, — hours/);
+  assert.equal(await page.locator('.sidebar .playlist-link strong').nth(1).textContent(), 'Тихие вечера', 'user metadata stays untranslated');
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: '../backend/.zig-cache/ui-english.png' });
+  await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  assert.equal(await page.locator('html').getAttribute('lang'), 'en-US', 'language survives reload');
+  assert.equal(await page.locator('#sidebar-resize').getAttribute('aria-valuenow'), '244', 'sidebar width survives reload');
+  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('ru-RU'); await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.sidebar .library-heading>span').textContent(), 'ПЛЕЙЛИСТЫ');
+
+  await page.locator('.sidebar .playlist-search-input').fill('тихие');
+  assert.equal(await page.locator('.sidebar [data-playlist]').count(), 1);
+  await page.locator('.sidebar .playlist-search-input').fill('');
+  await toggleTheme();
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
+  await overflow();
+  await page.screenshot({ path: '../backend/.zig-cache/ui-light-desktop.png' });
+  await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  assert.equal(await page.locator('html').getAttribute('data-theme'), 'light', 'theme survives reload');
+  await toggleTheme();
   assert.equal(await page.locator('.track-title img').count(), 0, 'track title must be escaped');
   await page.locator('#search').fill('m83'); assert.equal(await page.locator('.track-row').count(), 1);
   await page.locator('#search').fill('nothing matches'); await page.getByRole('heading', { name: 'Ничего не нашлось' }).waitFor();
   await page.locator('#search').fill(''); await page.locator(`[data-play="${id(10)}"]`).click();
   await page.locator('#player-play[aria-label="Пауза"]').waitFor();
   assert.equal(await page.locator('#now-title').textContent(), 'Midnight City');
+  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('en-US'); await page.keyboard.press('Escape');
+  await page.locator('#player-play[aria-label="Pause"]').waitFor();
+  assert.equal(await page.locator('#now-title').textContent(), 'Midnight City', 'language switch keeps the current track');
+  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('ru-RU'); await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.querySelector('#elapsed').textContent !== '0:00');
   await page.locator('#player-play').click(); await page.locator('#player-play[aria-label="Воспроизвести"]').waitFor();
+  await page.locator('#player-play').hover();
+  assert.equal(await page.locator('#player-play').evaluate((button) => getComputedStyle(button).backgroundColor), 'rgb(248, 249, 255)', 'player button keeps its contrast on hover');
   await page.screenshot({ path: '../backend/.zig-cache/ui-desktop.png' });
+  await page.locator('#queue-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#collection').getBoundingClientRect().right + 7 <= document.querySelector('#queue-panel').getBoundingClientRect().left);
+  await overflow();
+  assert.equal(await page.locator('#queue-panel').getAttribute('inert'), null);
+  assert.equal(await page.locator('[data-queue-play]').count(), 2);
+  await page.locator(`[data-queue-remove="${id(11)}"]`).click();
+  assert.equal(await page.locator('[data-queue-play]').count(), 1);
+  await page.locator(`[data-track-row="${id(11)}"]`).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Добавить в очередь', exact: true }).click();
+  assert.equal(await page.locator('[data-queue-play]').count(), 2);
+  await page.screenshot({ path: '../backend/.zig-cache/ui-queue.png' });
+  await page.locator(`[data-queue-play="${id(11)}"]`).click();
+  await page.waitForFunction(() => document.querySelector('#now-title').textContent === 'Weightless');
+  await page.locator('#player-play[aria-label="Пауза"]').waitFor();
+  await page.locator('#queue-close').click();
+  await page.locator(`[data-play="${id(10)}"]`).click(); await page.locator('#player-play[aria-label="Пауза"]').waitFor(); await page.locator('#player-play').click();
+  await page.locator(`[data-track-menu="${id(10)}"]`).click();
+  await page.locator(`[data-track-menu="${id(10)}"]`).click();
+  assert.equal(await page.locator('#context-menu').isVisible(), false, 'second click on the same ellipsis closes the menu');
+  await page.locator(`[data-track-menu="${id(10)}"]`).click();
+  await page.locator('#attach-track').hover();
+  assert.equal(await page.locator('#context-submenu').isVisible(), true, 'hover opens the adjacent submenu');
+  assert.equal(await page.locator('#remove-track').isVisible(), true, 'parent actions remain visible');
+  const parentMenu = await page.locator('#context-menu').boundingBox(); const childMenu = await page.locator('#context-submenu').boundingBox();
+  assert.ok(childMenu.x + childMenu.width <= parentMenu.x || childMenu.x >= parentMenu.x + parentMenu.width, 'desktop submenu sits next to its parent');
+  await page.locator('#attach-track').focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('#context-submenu').evaluate(el => el.contains(document.activeElement)), true);
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.locator('#context-submenu').isVisible(), false); assert.equal(await page.locator('#attach-track').evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#context-submenu').isVisible(), false); assert.equal(await page.locator('#context-menu').isVisible(), true);
+  await page.locator('#attach-track').click(); await page.getByRole('menuitem', { name: 'В дороге', exact: true }).click();
+  assert.equal(await page.locator('#context-menu').isVisible(), false); assert.equal(await page.locator('#context-submenu').isVisible(), false);
+  await page.waitForFunction(() => document.querySelector('#toast').textContent === 'Трек добавлен в плейлист');
+  assert.equal(members.get(id(4)).some(t => t.id === id(10)), true);
+
   await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click(); await page.getByRole('heading', { name: 'Тихие вечера' }).waitFor();
   await page.locator(`[data-track-menu="${id(10)}"]`).click(); await page.locator('#remove-track').click();
   assert.match(await page.locator('#confirm-description').textContent(), /останется в Uploads/);
@@ -111,8 +287,11 @@ try {
   assert.match(await page.locator('#confirm-description').textContent(), /всех плейлистов/);
   await page.locator('#confirm-delete').click(); await page.waitForFunction(() => document.querySelectorAll('.track-row').length === 2);
   assert.equal(mutations.at(-1).path, `/api/tracks/${id(10)}`);
-  assert.equal(await page.locator('#now-title').textContent(), 'Выберите трек');
+  assert.equal(await page.locator('.now-playing').isVisible(), false);
+  await page.locator(`.sidebar [data-playlist="${id(4)}"]`).click();
+  await page.getByRole('heading', { name: 'В дороге', exact: true }).waitFor();
   await page.locator('.topbar [data-action="upload"]').click();
+  assert.equal(await page.locator('#upload-target').count(), 0);
   await page.locator('#file-input').setInputFiles([{ name: 'Artist - New song.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('mock audio') }, { name: 'Other.flac', mimeType: 'audio/flac', buffer: Buffer.from('mock flac') }]);
   assert.equal(await page.locator('[data-upload-title]').first().inputValue(), 'New song');
   await page.locator('[data-upload-artist]').first().fill('Edited artist');
@@ -120,11 +299,39 @@ try {
   await page.locator('#start-upload').click(); await page.locator('.upload-item.done').nth(1).waitFor();
   assert.equal(mutations.filter((m) => m.path === '/api/tracks').length, 2);
   assert.equal(tracks.find((t) => t.title === 'New song').artist, 'Edited artist');
+  assert.deepEqual(mutations.filter((m) => m.path === '/api/tracks').map((m) => m.body.playlist_ids), [[], []], 'files upload only to Uploads, even from another playlist');
   await page.locator('#upload-dialog [data-close]').click();
   await page.locator('.sidebar [data-action="new-playlist"]').click();
   await page.locator('#playlist-form [name="title"]').fill('Новый плейлист');
-  await page.locator('#playlist-form button').click(); await page.getByRole('heading', { name: 'Новый плейлист', exact: true }).waitFor();
-  await page.locator('.sidebar [data-action="spotify-import"]').click();
+  await page.locator('#playlist-image-input').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: imageBytes });
+  assert.equal(await page.locator('#playlist-image-preview').isVisible(), true);
+
+  await page.locator('#playlist-save').click(); await page.locator('#playlist-dialog').waitFor({ state: 'hidden' }); await page.getByRole('heading', { name: 'Новый плейлист', exact: true }).waitFor();
+  const created = playlists.find(p => p.title === 'Новый плейлист');
+  assert.ok(created.image_key, 'artwork uploads after playlist creation');
+  assert.ok(mutations.some(m => m.method === 'PUT' && m.path === `/api/playlists/${created.id}/image`));
+  await page.locator(`.sidebar [data-playlist="${created.id}"]`).click({ button: 'right' });
+  await page.locator('#edit-playlist').click(); await page.locator('#playlist-dialog[open]').waitFor();
+  await page.locator('#playlist-form [name=title]').fill('Updated mix');
+  await page.locator('#playlist-form [name=description]').fill('New description');
+  await page.locator('#playlist-form [name=visibility]').selectOption('public');
+  await page.locator('#playlist-save').click(); await page.getByRole('heading', { name: 'Updated mix', exact: true }).waitFor();
+  assert.equal(created.description, 'New description'); assert.equal(created.visibility, 'public'); assert.deepEqual(created.tags, ['ambient']);
+  await page.locator(`.sidebar [data-playlist="${created.id}"]`).click({ button: 'right' });
+  await page.locator('#delete-playlist').click();
+  assert.match(await page.locator('#confirm-description').textContent(), /Треки останутся/);
+  await page.locator('#confirm-delete').click(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  assert.equal(playlists.some(p => p.id === created.id), false);
+  await page.locator('.sidebar [data-action=new-playlist]').click();
+  await page.locator('#playlist-form [name=title]').fill('Retry cover');
+  await page.locator('#playlist-image-input').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: imageBytes });
+  failImage = true; const beforeCreates = mutations.filter(m => m.method === 'POST' && m.path === '/api/playlists').length;
+  await page.locator('#playlist-save').click();
+  await page.getByText('Плейлист сохранён, но обложка не загружена.', { exact: false }).waitFor();
+  await page.locator('#playlist-save').click(); await page.locator('#playlist-dialog').waitFor({ state: 'hidden' });
+  assert.equal(mutations.filter(m => m.method === 'POST' && m.path === '/api/playlists').length, beforeCreates + 1, 'retry artwork without creating a duplicate playlist');
+
+  await openSpotify();
   await page.locator('#spotify-files').setInputFiles([{ name: 'Broken.json', mimeType: 'application/json', buffer: Buffer.from('{broken') }]);
   await page.getByText('Broken.json: некорректный JSON', { exact: true }).waitFor();
   assert.equal(await page.locator('#spotify-start').isDisabled(), true);
@@ -139,7 +346,7 @@ try {
   assert.equal(mutations.filter((m) => m.path === '/api/spotify/import').length, 1);
   await page.locator('#spotify-dialog [data-close]').click();
   await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
-  await page.locator('.sidebar [data-action="spotify-import"]').click();
+  await openSpotify();
   await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
   await page.locator('#spotify-dialog [data-close]').click();
   for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
@@ -148,8 +355,25 @@ try {
     await page.locator('#open-library').click(); await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click();
     await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
     assert.equal(await page.locator('#library-dialog').isVisible(), false);
+    await page.locator('[data-track-menu]').first().click();
+    await page.locator('#attach-track').click();
+    assert.equal(await page.locator('#context-menu').isVisible(), true); assert.equal(await page.locator('#context-submenu').isVisible(), true);
+    const mobileRoot = await page.locator('#context-menu').boundingBox(); const mobileChild = await page.locator('#context-submenu').boundingBox();
+    assert.ok(mobileChild.y >= mobileRoot.y + mobileRoot.height, 'narrow screens keep submenu below parent');
+    assert.ok(mobileChild.x >= 0 && mobileChild.x + mobileChild.width <= viewport.width && mobileChild.y + mobileChild.height <= viewport.height, 'submenu stays in the viewport');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
     await page.screenshot({ path: `../backend/.zig-cache/ui-mobile-${viewport.width}.png` });
-    await page.locator('#open-library').click(); await page.locator('#library-dialog [data-action="spotify-import"]').click();
+    await page.locator('#queue-toggle').click(); await page.locator('#queue-panel.open').waitFor(); await overflow();
+    await page.waitForFunction(() => document.querySelector('#collection').getBoundingClientRect().bottom + 5 <= document.querySelector('#queue-panel').getBoundingClientRect().top);
+    await page.locator('#queue-close').click();
+    await page.locator('#open-library').click(); await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click({ button: 'right' });
+    assert.equal(await page.locator('#delete-playlist').isDisabled(), true);
+    assert.equal(await page.locator('#context-menu').isVisible(), true);
+    await page.keyboard.press('Escape'); await page.locator('#library-dialog [data-close]').click();
+    await toggleTheme(); await overflow();
+    await page.screenshot({ path: `../backend/.zig-cache/ui-light-mobile-${viewport.width}.png` });
+    await toggleTheme();
+    await openSpotify();
     await page.locator('#spotify-dialog[open]').waitFor(); await overflow();
     assert.equal(await page.locator('#library-dialog').isVisible(), false);
     await page.screenshot({ path: `../backend/.zig-cache/ui-spotify-${viewport.width}.png` });
@@ -159,6 +383,11 @@ try {
   await page.locator('#auth-form [name="username"]').fill('music_lover');
   await page.locator('#auth-form [name="password"]').fill('test-password-123');
   await page.locator('#auth-submit').click(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  await page.locator('#profile-toggle').click();
+  assert.equal(authenticated, true, 'profile click opens the menu without signing out');
+  await page.locator('#profile-menu [data-action="logout"]').click();
+  await page.locator('#auth-dialog[open]').waitFor();
+  assert.equal(authenticated, false, 'sign out is available in the profile menu');
   assert.deepEqual(errors, []);
-  console.log('PASS: desktop/mobile layouts, search, escaped metadata, AAC HLS playback, uploads, Spotify JSON preview/import/retry, playlists, auth and both deletion modes.');
+  console.log('PASS: rounded responsive panels, context menus, playlist editing/deletion/artwork/retry, queue playback/removal, mute, duration placeholders, localization, HLS, uploads, Spotify and auth.');
 } finally { await browser.close(); rmSync(temporary, { recursive: true, force: true }); }

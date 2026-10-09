@@ -1,3 +1,4 @@
+import { t } from './i18n';
 export interface SpotifyTrack { title: string; artist: string; spotify_uri?: string }
 export interface SpotifyPlaylist { title: string; description: string; tracks: SpotifyTrack[] }
 export interface SpotifyImport { playlists: SpotifyPlaylist[]; library: SpotifyTrack[] }
@@ -5,17 +6,17 @@ export interface SpotifyExport { kind: 'playlists' | 'library'; playlists: Spoti
 export const maxExportBytes = 16 * 1024 * 1024;
 
 function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Некорректная структура Spotify JSON');
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(t('Некорректная структура Spotify JSON'));
   return value as Record<string, unknown>;
 }
 function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error('В Spotify JSON ожидался список');
+  if (!Array.isArray(value)) throw new Error(t('В Spotify JSON ожидался список'));
   return value;
 }
 function text(value: unknown, max: number, empty = false): string {
-  if (typeof value !== 'string') throw new Error('В Spotify JSON отсутствует название или исполнитель');
+  if (typeof value !== 'string') throw new Error(t('В Spotify JSON отсутствует название или исполнитель'));
   const normalized = value.trim();
-  if ((!empty && !normalized) || [...normalized].length > max || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(normalized) || (!empty && /[\t\r\n]/.test(normalized))) throw new Error('Некорректная длина или символы в метаданных Spotify');
+  if ((!empty && !normalized) || [...normalized].length > max || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(normalized) || (!empty && /[\t\r\n]/.test(normalized))) throw new Error(t('Некорректная длина или символы в метаданных Spotify'));
   return normalized;
 }
 function track(value: unknown, library: boolean): SpotifyTrack | null {
@@ -24,7 +25,7 @@ function track(value: unknown, library: boolean): SpotifyTrack | null {
   if (typeof uri === 'string' && (uri.startsWith('spotify:local:') || uri.startsWith('spotify:episode:'))) return null;
   const result: SpotifyTrack = { title: text(library ? r.track : r.trackName, 256), artist: text(library ? r.artist : r.artistName, 256) };
   if (uri !== null && uri !== undefined && uri !== '') {
-    if (typeof uri !== 'string' || !/^spotify:track:[a-zA-Z0-9]{22}$/.test(uri)) throw new Error('Некорректный URI трека Spotify');
+    if (typeof uri !== 'string' || !/^spotify:track:[a-zA-Z0-9]{22}$/.test(uri)) throw new Error(t('Некорректный URI трека Spotify'));
     result.spotify_uri = uri;
   }
   return result;
@@ -42,7 +43,7 @@ export function parseSpotifyExport(value: unknown): SpotifyExport {
         const item = object(value);
         if (item.track === null || item.track === undefined) {
           if (item.episode != null || item.localTrack != null) { skipped++; continue; }
-          throw new Error('В элементе плейлиста Spotify отсутствует трек');
+          throw new Error(t('В элементе плейлиста Spotify отсутствует трек'));
         }
         const parsed = track(item.track, false);
         if (parsed) tracks.push(parsed); else skipped++;
@@ -59,7 +60,7 @@ export function parseSpotifyExport(value: unknown): SpotifyExport {
     }
     return { kind: 'library', playlists: [], library, skipped };
   }
-  throw new Error('Выберите Playlists.json или YourLibrary.json из выгрузки данных Spotify');
+  throw new Error(t('Выберите Playlists.json или YourLibrary.json из выгрузки данных Spotify'));
 }
 
 export function trackIdentity(track: SpotifyTrack): string {
@@ -71,12 +72,12 @@ export function combineSpotifyExports(exports: SpotifyExport[]): { input: Spotif
   const input: SpotifyImport = { playlists: [], library: [] };
   let skipped = 0;
   for (const file of exports) {
-    if (kinds.has(file.kind)) throw new Error('Выберите по одному файлу Playlists.json и YourLibrary.json');
+    if (kinds.has(file.kind)) throw new Error(t('Выберите по одному файлу Playlists.json и YourLibrary.json'));
     kinds.add(file.kind); input.playlists.push(...file.playlists); input.library.push(...file.library); skipped += file.skipped;
   }
   const all = [...input.library, ...input.playlists.flatMap((p) => p.tracks)];
-  if (!all.length) throw new Error('В выбранных файлах нет музыкальных треков');
-  if (all.length > 5000 || input.playlists.length > 100) throw new Error('За один импорт можно передать до 5000 записей треков и 100 плейлистов');
-  if (new TextEncoder().encode(JSON.stringify(input)).length > 4 * 1024 * 1024) throw new Error('Метаданные импорта превышают 4 МБ');
+  if (!all.length) throw new Error(t('В выбранных файлах нет музыкальных треков'));
+  if (all.length > 5000 || input.playlists.length > 100) throw new Error(t('За один импорт можно передать до 5000 записей треков и 100 плейлистов'));
+  if (new TextEncoder().encode(JSON.stringify(input)).length > 4 * 1024 * 1024) throw new Error(t('Метаданные импорта превышают 4 МБ'));
   return { input, tracks: new Set(all.map(trackIdentity)).size, skipped };
 }

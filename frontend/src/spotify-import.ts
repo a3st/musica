@@ -1,3 +1,4 @@
+import { t, msg } from './i18n';
 import { api, ApiError, errorMessage, type SpotifyImportStatus } from './api';
 import { combineSpotifyExports, maxExportBytes, parseSpotifyExport, type SpotifyImport } from './spotify';
 import { $, dialog } from './view';
@@ -8,12 +9,19 @@ export class SpotifyImporter {
   private reading = 0;
   private generation = 0;
   private busy = false;
+  private preview: { tracks: number; skipped: number } | null = null;
   constructor(private readonly changed: (playlist?: string) => Promise<void>, private readonly userId: () => string | null) {
     $<HTMLInputElement>('#spotify-files').onchange = () => { void this.read(); };
     $<HTMLFormElement>('#spotify-form').onsubmit = (e) => { e.preventDefault(); void this.start(); };
     $('#spotify-retry').onclick = () => { void this.retry(); };
   }
   open(): void { dialog('spotify-dialog').showModal(); }
+  async localize(): Promise<void> {
+    if (this.input && this.preview) {
+      $('#spotify-summary').textContent = msg`${this.preview.tracks} уникальных треков · ${this.input.playlists.length} плейлистов${this.preview.skipped ? msg` · пропущено подкастов и локальных файлов: ${this.preview.skipped}` : ''}`;
+    }
+    try { await this.poll(); } catch { /* Normal polling reports connection failures. */ }
+  }
   async restore(): Promise<void> {
     const user = this.userId();
     if (!user) return;
@@ -24,7 +32,7 @@ export class SpotifyImporter {
     try { await this.poll(); } catch (error) { $('#spotify-error').textContent = errorMessage(error); }
   }
   reset(): void {
-    this.generation++; this.reading++; this.input = null; this.current = null; this.busy = false;
+    this.generation++; this.reading++; this.input = null; this.current = null; this.busy = false; this.preview = null;
     $<HTMLFormElement>('#spotify-form').reset(); $('#spotify-summary').textContent = ''; $('#spotify-progress').textContent = '';
     $('#spotify-error').textContent = ''; $<HTMLButtonElement>('#spotify-start').disabled = true; $('#spotify-retry').hidden = true;
     $<HTMLButtonElement>('#spotify-retry').disabled = false;
@@ -34,17 +42,17 @@ export class SpotifyImporter {
     const version = ++this.reading;
     this.input = null; $('#spotify-error').textContent = ''; $<HTMLButtonElement>('#spotify-start').disabled = true;
     const files = [...($<HTMLInputElement>('#spotify-files').files ?? [])];
-    $('#spotify-summary').textContent = 'Читаем файлы…';
+    $('#spotify-summary').textContent = t('Читаем файлы…');
     try {
-      if (!files.length || files.length > 2) throw new Error('Выберите один или два файла Spotify JSON');
+      if (!files.length || files.length > 2) throw new Error(t('Выберите один или два файла Spotify JSON'));
       const parsed = await Promise.all(files.map(async (file) => {
-        if (file.size > maxExportBytes) throw new Error(`${file.name}: файл превышает 16 МБ`);
+        if (file.size > maxExportBytes) throw new Error(msg`${file.name}: файл превышает 16 МБ`);
         try { return parseSpotifyExport(JSON.parse((await file.text()).replace(/^\uFEFF/, '')) as unknown); }
-        catch (error) { throw new Error(`${file.name}: ${error instanceof SyntaxError ? 'некорректный JSON' : errorMessage(error)}`); }
+        catch (error) { throw new Error(`${file.name}: ${error instanceof SyntaxError ? t('некорректный JSON') : errorMessage(error)}`); }
       }));
       if (version !== this.reading) return;
-      const combined = combineSpotifyExports(parsed); this.input = combined.input;
-      $('#spotify-summary').textContent = `${combined.tracks} уникальных треков · ${combined.input.playlists.length} плейлистов${combined.skipped ? ` · пропущено подкастов и локальных файлов: ${combined.skipped}` : ''}`;
+      const combined = combineSpotifyExports(parsed); this.input = combined.input; this.preview = combined;
+      $('#spotify-summary').textContent = msg`${combined.tracks} уникальных треков · ${combined.input.playlists.length} плейлистов${combined.skipped ? msg` · пропущено подкастов и локальных файлов: ${combined.skipped}` : ''}`;
       $<HTMLButtonElement>('#spotify-start').disabled = false;
     } catch (error) {
       if (version !== this.reading) return;
@@ -63,7 +71,7 @@ export class SpotifyImporter {
       this.current = { id: result.id, tracks: [] };
       const user = this.userId();
       try { if (user) localStorage.setItem(`musica:spotify:${user}`, result.id); } catch { /* Import works without browser storage. */ }
-      $('#spotify-progress').textContent = `${result.tracks} треков поставлены в очередь. Можно закрыть это окно.`;
+      $('#spotify-progress').textContent = msg`${result.tracks} треков поставлены в очередь. Можно закрыть это окно.`;
       await this.changed(result.playlists[0]);
       await this.poll();
     } catch (error) { if (generation === this.generation) $('#spotify-error').textContent = errorMessage(error); }
@@ -81,7 +89,7 @@ export class SpotifyImporter {
     try { result = await api.spotifyImportStatus(id); }
     catch (error) {
       if (error instanceof ApiError && error.status === 404 && generation === this.generation) {
-        this.current = null; $('#spotify-progress').textContent = 'Треки этого импорта удалены'; $('#spotify-retry').hidden = true;
+        this.current = null; $('#spotify-progress').textContent = t('Треки этого импорта удалены'); $('#spotify-retry').hidden = true;
         return;
       }
       throw error;
@@ -90,7 +98,7 @@ export class SpotifyImporter {
     this.current = result;
     const count = (predicate: (t: SpotifyImportStatus['tracks'][number]) => boolean) => result.tracks.filter(predicate).length;
     const failed = count((t) => t.download === 'failed' || t.preparation === 'failed');
-    $('#spotify-progress').textContent = `Готово: ${count((t) => t.status === 'streamed')} из ${result.tracks.length} · скачивание: ${count((t) => t.download === 'processing')} · в очереди: ${count((t) => t.download === 'queued')} · подготовка: ${count((t) => t.status === 'ready' && t.preparation !== 'failed')}${failed ? ` · ошибки: ${failed}` : ''}`;
+    $('#spotify-progress').textContent = msg`Готово: ${count((t) => t.status === 'streamed')} из ${result.tracks.length} · скачивание: ${count((t) => t.download === 'processing')} · в очереди: ${count((t) => t.download === 'queued')} · подготовка: ${count((t) => t.status === 'ready' && t.preparation !== 'failed')}${failed ? msg` · ошибки: ${failed}` : ''}`;
     $('#spotify-retry').hidden = !failed;
   }
   private async retry(): Promise<void> {

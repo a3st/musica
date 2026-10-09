@@ -210,6 +210,14 @@ def run_checks(optimize="Debug", backend_image=None):
         bob = request("POST", "/api/auth/register", {"username": "bob", "password": password}, expected=201)
         a, b = alice["token"], bob["token"]
         default = request("GET", "/api/users/me", token=a)["default_playlist_id"]
+        default_path = '/api/playlists/' + default
+        original_default = request('GET', default_path, token=a)
+        protected = {'error': 'default_playlist_protected'}
+        assert request('PUT', default_path, {'title': 'Renamed', 'description': 'Changed', 'visibility': 'public', 'tags': ['test']}, token=a, expected=409) == protected
+        assert request('PUT', default_path + '/image', b'\x89PNG\r\n\x1a\nfixture', token=a, mime='image/png', expected=409) == protected
+        assert request('POST', default_path + '/share-link', token=a, expected=409) == protected
+        assert request('GET', default_path, token=a) == original_default
+        assert not objects, 'protected default cover must not upload to S3'
         assert request('GET', '/api/users/me', cookie=a)['id'] == alice['user_id']
         request('GET', '/api/users/me', cookie='invalid', expected=401)
         request('POST', '/api/tracks', {'title': 'CSRF', 'artist': 'Denied'}, cookie=a, origin='http://evil.example', expected=403)
@@ -348,7 +356,7 @@ def run_checks(optimize="Debug", backend_image=None):
         request("PUT", path + "/tracks/" + track, token=a, expected=204)
         assert len(request("GET", path, token=b)["tracks"]) == 1
         request("DELETE", f"/api/playlists/{default}/tracks/{track}", token=b, expected=404)
-        request("PUT", f"/api/playlists/{default}", {"title": "Uploads", "visibility": "public"}, token=a, expected=400)
+        request("PUT", f"/api/playlists/{default}", {"title": "Uploads", "visibility": "public"}, token=a, expected=409)
         count = sql("SELECT count(*) FROM musica.tracks")
         request("POST", "/api/tracks", {"playlist_ids": [playlist, str(uuid.uuid4())], "title": "Rollback", "artist": "Artist"}, token=a, expected=404)
         assert sql("SELECT count(*) FROM musica.tracks") == count

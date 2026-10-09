@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#171917" />
+    <meta name="theme-color" content="#0b0f1c" />
+    <script>
+      try {
+        const theme = localStorage.getItem('musica:theme') === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f1f5f9' : '#0b0f1c';
+      } catch {}
+    </script>
     <meta name="description" content="Musica — ваша музыка на собственном сервере" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />

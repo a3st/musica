@@ -1,7 +1,8 @@
+import { t, msg } from './i18n';
 export type TrackStatus = 'pending' | 'ready' | 'streamed';
 export interface Track { id: string; title: string; artist: string; status: TrackStatus; owner_id: string | null }
-export interface PlaylistSummary { id: string; owner_id: string; title: string; description: string; visibility: 'private' | 'public' | 'unlisted'; is_default: boolean; image_key: string | null; role: 'owner' | 'editor' | 'viewer'; track_count: number }
-export interface Playlist { id: string; owner_id: string; title: string; description: string; visibility: PlaylistSummary['visibility']; is_default: boolean; image_key: string | null; tracks: Track[] }
+export interface PlaylistSummary { id: string; owner_id: string; title: string; description: string; tags?: string[]; visibility: 'private' | 'public' | 'unlisted'; is_default: boolean; image_key: string | null; role: 'owner' | 'editor' | 'viewer'; track_count: number }
+export interface Playlist { id: string; owner_id: string; title: string; description: string; tags?: string[]; visibility: PlaylistSummary['visibility']; is_default: boolean; image_key: string | null; tracks: Track[] }
 export interface User { id: string; username: string; default_playlist_id: string }
 export interface HlsState { status: TrackStatus; preparation: 'queued' | 'processing' | 'completed' | 'failed' | null }
 export interface SpotifyImportStatus { id: string; tracks: { id: string; title: string; artist: string; download: 'queued' | 'processing' | 'completed' | 'failed'; status: TrackStatus | null; preparation: HlsState['preparation'] }[] }
@@ -10,19 +11,19 @@ export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
 }
 function record(data: unknown): Record<string, unknown> {
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error('Сервер вернул некорректные данные');
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error(t('Сервер вернул некорректные данные'));
   return data as Record<string, unknown>;
 }
-function text(data: unknown): string { if (typeof data !== 'string') throw new Error('Некорректный текст в ответе'); return data; }
+function text(data: unknown): string { if (typeof data !== 'string') throw new Error(t('Некорректный текст в ответе')); return data; }
 function uuid(data: unknown): string {
   const id = text(data);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error('Некорректный ID в ответе');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error(t('Некорректный ID в ответе'));
   return id;
 }
 function nullableText(data: unknown): string | null { return data === null ? null : text(data); }
-function bool(data: unknown): boolean { if (typeof data !== 'boolean') throw new Error('Некорректный ответ'); return data; }
+function bool(data: unknown): boolean { if (typeof data !== 'boolean') throw new Error(t('Некорректный ответ')); return data; }
 function choice<T extends string>(data: unknown, values: readonly T[]): T {
-  if (typeof data !== 'string' || !values.includes(data as T)) throw new Error('Неизвестное значение в ответе');
+  if (typeof data !== 'string' || !values.includes(data as T)) throw new Error(t('Неизвестное значение в ответе'));
   return data as T;
 }
 function track(data: unknown): Track {
@@ -31,12 +32,18 @@ function track(data: unknown): Track {
 }
 function metadata(data: unknown) {
   const r = record(data);
-  return { id: uuid(r.id), owner_id: uuid(r.owner_id), title: text(r.title), description: text(r.description), visibility: choice(r.visibility, ['private', 'public', 'unlisted'] as const), is_default: bool(r.is_default), image_key: nullableText(r.image_key) };
+  if (r.tags !== undefined && !Array.isArray(r.tags)) throw new Error(t('Некорректный ответ'));
+  return { id: uuid(r.id), owner_id: uuid(r.owner_id), title: text(r.title), description: text(r.description), tags: r.tags === undefined ? [] : (r.tags as unknown[]).map(text), visibility: choice(r.visibility, ['private', 'public', 'unlisted'] as const), is_default: bool(r.is_default), image_key: nullableText(r.image_key) };
+}
+function playlist(data: unknown): Playlist {
+  const r = record(data);
+  if (!Array.isArray(r.tracks)) throw new Error(t('Некорректный список треков'));
+  return { ...metadata(data), tracks: r.tracks.map(track) };
 }
 export async function request(path: string, init: RequestInit = {}): Promise<unknown> {
   const response = await fetch('/api' + path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(30000), ...init });
   if (response.status === 204) return null;
-  const data: unknown = await response.json().catch(() => { throw new Error('Сервер вернул некорректный ответ. Попробуйте позже.'); });
+  const data: unknown = await response.json().catch(() => { throw new Error(t('Сервер вернул некорректный ответ. Попробуйте позже.')); });
   if (!response.ok) throw new ApiError(response.status, typeof record(data).error === 'string' ? text(record(data).error) : 'request_failed');
   return data;
 }
@@ -44,7 +51,7 @@ const json = (body: unknown): RequestInit => ({ headers: { 'Content-Type': 'appl
 export const api = {
   async importSpotify(input: import('./spotify').SpotifyImport): Promise<{ id: string; tracks: number; playlists: string[] }> {
     const r = record(await request('/spotify/import', { method: 'POST', signal: AbortSignal.timeout(120000), ...json(input) }));
-    if (!Array.isArray(r.playlists) || typeof r.tracks !== 'number' || !Number.isSafeInteger(r.tracks) || r.tracks < 0) throw new Error('Некорректный результат импорта');
+    if (!Array.isArray(r.playlists) || typeof r.tracks !== 'number' || !Number.isSafeInteger(r.tracks) || r.tracks < 0) throw new Error(t('Некорректный результат импорта'));
     return { id: uuid(r.id), tracks: r.tracks, playlists: r.playlists.map(uuid) };
   },
   async spotifyImportStatus(id: string): Promise<SpotifyImportStatus> { return spotifyStatus(await request(`/spotify/imports/${id}`)); },
@@ -57,26 +64,38 @@ export const api = {
   async logout(): Promise<void> { await request('/auth/logout', { method: 'POST' }); },
   async playlists(): Promise<PlaylistSummary[]> {
     const data = await request('/playlists');
-    if (!Array.isArray(data)) throw new Error('Некорректный список плейлистов');
+    if (!Array.isArray(data)) throw new Error(t('Некорректный список плейлистов'));
     return data.map((item: unknown) => { const r = record(item); const count = r.track_count;
-      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) throw new Error('Некорректное количество треков');
+      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) throw new Error(t('Некорректное количество треков'));
       return { ...metadata(item), role: choice(r.role, ['owner', 'editor', 'viewer'] as const), track_count: count };
     });
   },
   async playlist(id: string): Promise<Playlist> {
-    const data = await request('/playlists/' + id); const r = record(data);
-    if (!Array.isArray(r.tracks)) throw new Error('Некорректный список треков');
-    return { ...metadata(data), tracks: r.tracks.map(track) };
+    return playlist(await request('/playlists/' + id));
+  },
+  async sharedPlaylist(token: string): Promise<Playlist> { return playlist(await request('/shared/playlists/' + encodeURIComponent(token))); },
+  async createShareLink(id: string): Promise<string> {
+    const path = text(record(await request(`/playlists/${id}/share-link`, { method: 'POST' })).path);
+    const token = /^\/api\/shared\/playlists\/([0-9a-f]{64})$/.exec(path)?.[1];
+    if (!token) throw new Error(t('Некорректный ответ'));
+    return token;
   },
   async createPlaylist(title: string, description: string, visibility: Playlist['visibility']): Promise<string> {
     return uuid(record(await request('/playlists', { method: 'POST', ...json({ title, description, visibility }) })).id);
+  },
+  async updatePlaylist(id: string, title: string, description: string, visibility: Playlist['visibility'], tags: string[]): Promise<void> {
+    await request('/playlists/' + id, { method: 'PUT', ...json({ title, description, visibility, tags }) });
+  },
+  async setPlaylistImage(id: string, file: File): Promise<void> {
+    const mime = file.type || (/\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg');
+    await request(`/playlists/${id}/image`, { method: 'PUT', headers: { 'Content-Type': mime }, body: file, signal: AbortSignal.timeout(120000) });
   },
   async createTrack(title: string, artist: string, playlistIds: string[]): Promise<string> {
     return uuid(record(await request('/tracks', { method: 'POST', ...json({ title, artist, playlist_ids: playlistIds }) })).id);
   },
   async removePlaylist(id: string): Promise<void> { await request('/playlists/' + id, { method: 'DELETE' }); },
   async prepare(id: string): Promise<HlsState> { return hlsState(await request(`/tracks/${id}/hls`, { method: 'POST' })); },
-  async preparation(id: string): Promise<HlsState> { return hlsState(await request(`/tracks/${id}/hls/status`)); },
+  async preparation(id: string, shareToken?: string | null): Promise<HlsState> { return hlsState(await request(`/tracks/${id}/hls/status${shareToken ? '?share_token=' + encodeURIComponent(shareToken) : ''}`)); },
   async removeTrack(id: string): Promise<void> { await request('/tracks/' + id, { method: 'DELETE' }); },
   async detachTrack(playlistId: string, trackId: string): Promise<void> { await request(`/playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' }); },
   async attachTrack(playlistId: string, trackId: string): Promise<void> { await request(`/playlists/${playlistId}/tracks/${trackId}`, { method: 'PUT' }); },
@@ -87,7 +106,7 @@ function hlsState(data: unknown): HlsState {
 }
 function spotifyStatus(data: unknown): SpotifyImportStatus {
   const r = record(data);
-  if (!Array.isArray(r.tracks)) throw new Error('Некорректный статус импорта');
+  if (!Array.isArray(r.tracks)) throw new Error(t('Некорректный статус импорта'));
   return { id: uuid(r.id), tracks: r.tracks.map((value: unknown) => {
     const t = record(value);
     return { id: uuid(t.id), title: text(t.title), artist: text(t.artist), download: choice(t.download, ['queued', 'processing', 'completed', 'failed'] as const), status: t.status === null ? null : choice(t.status, ['pending', 'ready', 'streamed'] as const), preparation: t.preparation === null ? null : choice(t.preparation, ['queued', 'processing', 'completed', 'failed'] as const) };
@@ -109,19 +128,19 @@ export function uploadFile(id: string, file: File, progress: (percent: number) =
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else { let code = 'upload_failed'; try { code = text(record(JSON.parse(xhr.responseText) as unknown).error); } catch { /* Keep generic message. */ } reject(new ApiError(xhr.status, code)); }
     };
-    xhr.onerror = () => { finish(); reject(new Error('Не удалось загрузить файл. Проверьте соединение.')); };
-    xhr.ontimeout = () => { finish(); reject(new Error('Сервер не завершил загрузку вовремя')); };
-    xhr.onabort = () => { finish(); reject(new DOMException('Загрузка отменена', 'AbortError')); };
+    xhr.onerror = () => { finish(); reject(new Error(t('Не удалось загрузить файл. Проверьте соединение.'))); };
+    xhr.ontimeout = () => { finish(); reject(new Error(t('Сервер не завершил загрузку вовремя'))); };
+    xhr.onabort = () => { finish(); reject(new DOMException(t('Загрузка отменена'), 'AbortError')); };
     signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) { finish(); reject(new DOMException('Загрузка отменена', 'AbortError')); return; }
+    if (signal.aborted) { finish(); reject(new DOMException(t('Загрузка отменена'), 'AbortError')); return; }
     xhr.send(file);
   });
 }
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const messages: Record<string, string> = { unauthorized: 'Войдите в аккаунт', invalid_credentials: 'Имя: 3–64 символа a–z, цифры или _. Пароль: от 12 символов.', conflict: 'Это имя пользователя уже занято', invalid_track_metadata: 'Название и исполнитель должны содержать от 1 до 256 символов', file_too_large: 'Файл превышает лимит сервера', track_preparation_in_progress: 'Трек ещё готовится. Попробуйте удалить его после завершения.', upload_in_progress: 'Загрузка этого трека ещё не завершена', not_found: 'Объект не найден или доступ отозван', track_not_found: 'Трек не найден или доступ отозван', internal_error: 'Не удалось выполнить запрос. Попробуйте позже.', hls_not_ready: 'Трек ещё готовится к воспроизведению' };
-    return messages[error.code] ?? `Не удалось выполнить запрос (${error.status})`;
+    const messages: Record<string, string> = { unauthorized: t('Войдите в аккаунт'), invalid_credentials: t('Имя: 3–64 символа a–z, цифры или _. Пароль: от 12 символов.'), conflict: t('Это имя пользователя уже занято'), invalid_track_metadata: t('Название и исполнитель должны содержать от 1 до 256 символов'), file_too_large: t('Файл превышает лимит сервера'), track_preparation_in_progress: t('Трек ещё готовится. Попробуйте удалить его после завершения.'), upload_in_progress: t('Загрузка этого трека ещё не завершена'), not_found: t('Объект не найден или доступ отозван'), track_not_found: t('Трек не найден или доступ отозван'), internal_error: t('Не удалось выполнить запрос. Попробуйте позже.'), hls_not_ready: t('Трек ещё готовится к воспроизведению') };
+    return messages[error.code] ?? msg`Не удалось выполнить запрос (${error.status})`;
   }
-  if (error instanceof Error) return error.name === 'TimeoutError' ? 'Сервер не ответил вовремя. Попробуйте ещё раз.' : error.name === 'TypeError' ? 'Не удаётся подключиться к серверу' : error.message;
-  return 'Не удалось выполнить действие';
+  if (error instanceof Error) return error.name === 'TimeoutError' ? t('Сервер не ответил вовремя. Попробуйте ещё раз.') : error.name === 'TypeError' ? t('Не удаётся подключиться к серверу') : error.message;
+  return t('Не удалось выполнить действие');
 }

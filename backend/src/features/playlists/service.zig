@@ -36,6 +36,7 @@ pub fn image(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const 
         try conn.begin();
         errdefer conn.rollback() catch {};
         try repository.requireWrite(conn, arena, id, user, false);
+        if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
         const value = try tracks_cleanup_service.reserve(conn, arena, app.storage.bucket, key);
         try conn.commit();
         break :blk value;
@@ -53,6 +54,7 @@ pub fn image(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const 
         errdefer conn.rollback() catch {};
         // Recheck permissions: an editor can be revoked while S3 is receiving the image.
         try repository.requireWrite(conn, arena, id, user, false);
+        if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
         try repository.setImage(conn, id, key);
         try tracks_cleanup_service.publish(conn, reservation);
         try conn.commit();
@@ -101,6 +103,7 @@ pub fn setMemberRole(db: *database.Database, arena: std.mem.Allocator, id: []con
     try conn.begin();
     errdefer conn.rollback() catch {};
     try repository.requireWrite(conn, arena, id, owner, true);
+    if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     if (std.ascii.eqlIgnoreCase(owner, user)) return error.InvalidInput;
     try repository.setMemberRole(conn, id, user, role);
     try conn.commit();
@@ -112,6 +115,7 @@ pub fn removeMember(db: *database.Database, arena: std.mem.Allocator, id: []cons
     try conn.begin();
     errdefer conn.rollback() catch {};
     try repository.requireWrite(conn, arena, id, owner, true);
+    if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     if (std.ascii.eqlIgnoreCase(owner, user)) return error.InvalidInput;
     try repository.removeMember(conn, id, user);
     try conn.commit();
@@ -123,6 +127,7 @@ pub fn link(db: *database.Database, arena: std.mem.Allocator, id: []const u8, us
     try conn.begin();
     errdefer conn.rollback() catch {};
     try repository.requireWrite(conn, arena, id, user, true);
+    if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     try repository.setLink(conn, id, hash);
     try conn.commit();
 }
@@ -140,6 +145,7 @@ fn updateRecord(db: *database.Database, arena: std.mem.Allocator, id: []const u8
     try conn.begin();
     errdefer conn.rollback() catch {};
     try repository.requireWrite(conn, arena, id, user, false);
+    if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     try repository.update(conn, id, title, description, tags, visibility);
     try conn.commit();
 }
