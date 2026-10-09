@@ -11,6 +11,8 @@ const auth_routes = @import("features/auth/routes.zig");
 const streaming_routes = @import("features/streaming/routes.zig");
 const streaming_worker = @import("features/streaming/worker.zig");
 const tracks_cleanup_worker = @import("features/tracks/cleanup_worker.zig");
+const spotify_int_routes = @import("features/spotify_int/routes.zig");
+const spotify_int_worker = @import("features/spotify_int/worker.zig");
 
 pub fn main(init: std.process.Init) !void {
     const config = try Config.load(init.environ_map);
@@ -19,6 +21,9 @@ pub fn main(init: std.process.Init) !void {
         .storage = S3.init(init.io, init.gpa, config.s3),
         .max_upload_bytes = config.max_upload_bytes,
         .ffmpeg_path = config.ffmpeg_path,
+        .ytdlp_path = config.ytdlp_path,
+        .spotify_tmp_dir = config.spotify_tmp_dir,
+        .spotify_timeout_seconds = config.spotify_timeout_seconds,
         .hls_tmp_dir = config.hls_tmp_dir,
         .hls_timeout_seconds = config.hls_timeout_seconds,
         .cookie_secure = config.cookie_secure,
@@ -43,6 +48,13 @@ pub fn main(init: std.process.Init) !void {
     playlists_routes.register(router);
     auth_routes.register(router);
     streaming_routes.register(router);
+    spotify_int_routes.register(router);
+
+    var spotify_future: ?std.Io.Future(anyerror!void) = if (config.spotify_worker_enabled)
+        try init.io.concurrent(spotify_int_worker.run, .{&app})
+    else
+        null;
+    defer if (spotify_future) |*future| future.cancel(init.io) catch {};
 
     var hls_future: ?std.Io.Future(anyerror!void) = if (config.hls_worker_enabled)
         try init.io.concurrent(streaming_worker.run, .{&app})
@@ -58,6 +70,9 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("features/spotify_int/model.zig");
+    _ = @import("features/spotify_int/routes.zig");
+    _ = @import("features/spotify_int/worker.zig");
     _ = @import("infrastructure/jobs/model.zig");
     _ = @import("features/playlists/model.zig");
     _ = @import("features/playlists/routes.zig");

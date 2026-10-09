@@ -26,10 +26,17 @@ COPY src/ ./src/
 COPY migrations/ ./migrations/
 RUN zig build test && zig build -Doptimize=ReleaseSafe
 
+FROM node:22-bookworm-slim AS javascript
+
 FROM debian:bookworm-slim AS runtime
+ARG YTDLP_VERSION=2026.08.19
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/yt-dlp \
+    && /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]==${YTDLP_VERSION}" mutagen pillow
+COPY --from=javascript /usr/local/bin/node /usr/local/bin/node
+ENV PATH="/opt/yt-dlp/bin:${PATH}"
 
 WORKDIR /app
 COPY --from=build /app/zig-out/bin/musica-backend /usr/local/bin/musica-backend

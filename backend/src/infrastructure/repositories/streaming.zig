@@ -12,9 +12,9 @@ pub fn read(conn: *database.Connection, arena: std.mem.Allocator, id: []const u8
     return std.json.parseFromSliceLeaky(streaming_model.State, arena, body, .{}) catch error.DatabaseUnavailable;
 }
 
-pub fn preparation(conn: *database.Connection, arena: std.mem.Allocator, id: []const u8, user: []const u8) !streaming_model.PreparationState {
+pub fn preparation(conn: *database.Connection, arena: std.mem.Allocator, id: []const u8, user: []const u8) !streaming_model.Input {
     const body = (try conn.text(arena, "SELECT json_build_object('status',status,'payload',json_build_object('track_id',id,'bucket',storage_bucket,'key',object_key,'size',COALESCE(size_bytes,0)))::text FROM musica.tracks WHERE id=$1 AND owner_id=$2 FOR UPDATE", .{ id, user })) orelse return error.TrackNotFound;
-    return std.json.parseFromSliceLeaky(streaming_model.PreparationState, arena, body, .{}) catch error.DatabaseUnavailable;
+    return std.json.parseFromSliceLeaky(streaming_model.Input, arena, body, .{}) catch error.DatabaseUnavailable;
 }
 
 pub fn finish(conn: *database.Connection, track_id: []const u8, bucket: []const u8, prefix: []const u8, segments: u32) !void {

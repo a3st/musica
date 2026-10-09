@@ -68,6 +68,9 @@ services:
       HLS_TIMEOUT_SECONDS: ${HLS_TIMEOUT_SECONDS:-900}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       HLS_TMP_DIR: /tmp/musica-hls
+      SPOTIFY_WORKER_ENABLED: ${SPOTIFY_WORKER_ENABLED:-true}
+      SPOTIFY_TIMEOUT_SECONDS: ${SPOTIFY_TIMEOUT_SECONDS:-900}
+      SPOTIFY_TMP_DIR: /tmp/musica-spotify
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:

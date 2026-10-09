@@ -6,6 +6,9 @@ dist/
 dev-dist/
 coverage/
 *.tsbuildinfo
+.venv/
+__pycache__/
+*.pyc
 
 # Zig build output and cache
 .zig-cache/
@@ -40,6 +43,7 @@ zig-pkg/
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+!.vscode/settings.json
 *.swp
 *.swo
 .DS_Store

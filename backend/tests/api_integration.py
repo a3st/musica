@@ -130,7 +130,7 @@ def run_checks(optimize="Debug", backend_image=None):
                         PGDATABASE='musica', PGUSER='musica', PGPASSWORD='test-db-password',
                         S3_ENDPOINT=f'http://host.docker.internal:{storage.server_port}',
                         S3_REGION='us-east-1', S3_BUCKET='uploads', S3_ACCESS_KEY_ID='test-access',
-                        S3_SECRET_ACCESS_KEY='test-secret', HLS_WORKER_ENABLED=str(worker).lower())
+                        S3_SECRET_ACCESS_KEY='test-secret', HLS_WORKER_ENABLED=str(worker).lower(), SPOTIFY_WORKER_ENABLED='false')
         command = ['docker', 'run', '-d', '--name', name, '--network', project + '_default',
                    '-p', '127.0.0.1::8080', '--add-host', 'host.docker.internal:host-gateway']
         for key, value in node_env.items():
@@ -157,7 +157,7 @@ def run_checks(optimize="Debug", backend_image=None):
             listener.bind(("127.0.0.1", 0))
             http_port = listener.getsockname()[1]
         env.update(HTTP_HOST="127.0.0.1", HTTP_PORT=str(http_port), PGHOST="127.0.0.1", PGPORT=port,
-                   S3_ENDPOINT=f"http://127.0.0.1:{storage.server_port}", HLS_WORKER_ENABLED='false')
+                   S3_ENDPOINT=f"http://127.0.0.1:{storage.server_port}", HLS_WORKER_ENABLED='false', SPOTIFY_WORKER_ENABLED='false')
         executable = BACKEND / "zig-out" / "bin" / ("musica-backend.exe" if os.name == "nt" else "musica-backend")
         if backend_image:
             base = start_node(False)
@@ -601,6 +601,10 @@ def run_checks(optimize="Debug", backend_image=None):
         assert all('/uploads/' + key not in objects for key in recovery_keys)
         print('PASS: expired processing cleanup is reclaimed and all 43 objects are deleted.')
         print('PASS: cookie sessions, CSRF, playlist listing, cover reads, unlink versus global delete, durable S3 cleanup and retries.')
+        if not backend_image:
+            subprocess.run(['zig', 'build', 'test-download-fixture'], cwd=BACKEND, check=True)
+            from spotify_integration import check_spotify
+            check_spotify(request, sql, env, executable, BACKEND)
         assert request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:
             diagnostics = subprocess.check_output(['docker', 'logs', containers[0]], stderr=subprocess.STDOUT, text=True)

@@ -4,6 +4,94 @@ Zig **0.16.0**, HTTP-сервер `httpz`, PostgreSQL через `pg.zig`, MinIO
 S3 PutObject/GetObject/DeleteObject с подписью AWS Signature V4, HLS через FFmpeg. Обе Zig-зависимости закреплены
 на конкретных коммитах для Zig 0.16.
 
+## Импорт Spotify
+
+Фича `spotify_int` принимает нормализованные метаданные из Spotify account data.
+Frontend читает `Playlists.json` (`playlists[].items[].track`) и `YourLibrary.json`
+(`tracks[]`), показывает предварительный итог и отправляет один запрос.
+
+```http
+POST /api/spotify/import
+Content-Type: application/json
+
+{
+  "playlists": [{
+    "title": "Мой Spotify mix",
+    "description": "",
+    "tracks": [{ "title": "Get Lucky", "artist": "Daft Punk", "spotify_uri": "spotify:track:2Foc5Q5nqNiosCNqttzHof" }]
+  }],
+  "library": [{ "title": "Get Lucky", "artist": "Daft Punk", "spotify_uri": "spotify:track:2Foc5Q5nqNiosCNqttzHof" }]
+}
+```
+
+Обе коллекции необязательны, но нужен хотя бы один трек. Нужна обычная сессия
+пользователя. Ответ `202`: `{ "id": "UUID импорта", "tracks": 1, "playlists": ["UUID"] }`.
+До 100 плейлистов, 5000 записей треков суммарно и 4 МБ нормализованного JSON.
+Создание плейлистов, треков, привязок и jobs выполняется одной транзакцией.
+Плейлисты приватные; каждый трек также привязан к пользовательскому Uploads.
+Совпадения по Spotify URI объединяются в пределах запроса, без URI — по названию
+и исполнителю без учёта ASCII-регистра. Следующий импорт создаёт новые записи.
+
+`GET /api/spotify/imports/:id` возвращает владельцу `{id, tracks}` с полями
+`id`, `title`, `artist`, `download` (queued/processing/completed/failed),
+`status` (pending/ready/streamed) и `preparation` (состояние HLS job или null).
+`POST /api/spotify/imports/:id/retry` повторно ставит неудачные скачивания в очередь.
+Для неудачного HLS используется обычный `POST /api/tracks/:id/hls`; кнопка
+повтора во frontend вызывает его автоматически. Технические причины остаются в логах.
+
+Каждый уникальный трек получает отдельную `public.jobs` с kind `spotify_download`,
+dedupe_key = track UUID; import_id, user_id и метаданные находятся в payload.
+Один worker на ноде скачивает последовательно, аренда — 120 секунд с продлением
+каждые 15 секунд. Ошибки скачивания повторяются до трёх попыток с задержкой 30 секунд;
+отсутствующий yt-dlp и неверные данные сразу переводят задание в failed.
+После остановки ноды просроченное задание подхватывается другой нодой.
+Для публикации оригинала повторно проверяются attempt_id и действующая аренда.
+Во время активного скачивания удаление трека и ручная загрузка получают `409`.
+Удаление неактивного трека также удаляет его download job.
+
+yt-dlp запускается напрямую, без shell, с поиском `ytsearch1:<исполнитель> <название>`
+и фиксированным временным именем `source.%(ext)s`. Используются `-x --audio-format mp3
+--audio-quality 256K --embed-metadata --embed-thumbnail --convert-thumbnails jpg
+--write-thumbnail`, bestaudio/best и настроенный FFmpeg. Обложка встраивается в MP3,
+если она есть у найденного видео; отдельная картинка трека в API пока не добавляется.
+Качество источника и точное совпадение версии композиции поиском не гарантируются.
+Временный каталог каждой попытки удаляется после выполнения. MP3 публикуется через
+`tracks_service.uploadForJob`: те же S3-резервация/очистка и переход pending → ready,
+что при ручной загрузке, затем ставится prepare_hls и трек переходит в streamed.
+Повтор после уже успешной публикации продолжает HLS, без повторного скачивания.
+Миграции для этой фичи не нужны: используется существующая общая таблица jobs.
+
+Docker-образ включает FFmpeg, Node.js 22 и yt-dlp **2026.08.19** с зависимостями для
+обложек и YouTube JS. Версия задаётся build-аргументом `YTDLP_VERSION`.
+Для локального запуска установите Node.js 22+ и yt-dlp с FFmpeg/FFprobe.
+Команды установки из корня репозитория:
+
+```powershell
+py -m venv backend/.venv
+backend/.venv/Scripts/python.exe -m pip install "yt-dlp[default]==2026.08.19" mutagen pillow
+```
+
+В `backend/.env` укажите абсолютные пути (без кавычек вокруг значения):
+
+```dotenv
+YTDLP_PATH=D:\source\musica\backend\.venv\Scripts\yt-dlp.exe
+FFMPEG_PATH=C:\Program Files\FFmpeg\bin\ffmpeg.exe
+SPOTIFY_WORKER_ENABLED=true
+SPOTIFY_TIMEOUT_SECONDS=900
+# SPOTIFY_TMP_DIR=D:\temp\musica-spotify
+```
+
+`FFMPEG_PATH` передаётся также в `--ffmpeg-location`; FFprobe должен находиться рядом.
+По умолчанию yt-dlp ищется в PATH, timeout — 900 секунд (1–3600), worker включён.
+Временный корень берётся из SPOTIFY_TMP_DIR, затем TEMP или /tmp/musica-spotify.
+Контейнер использует /tmp/musica-spotify. Нодам нужны доступ к Интернету,
+общим PostgreSQL и MinIO; общая локальная файловая система не требуется.
+
+Формат выгрузки описан в [Spotify](https://support.spotify.com/in-en/article/understanding-your-data/),
+параметры и требования загрузчика — в [документации yt-dlp](https://github.com/yt-dlp/yt-dlp#readme).
+Интеграционные проверки используют локальную фикстуру и не скачивают музыку:
+`python backend/tests/api_integration.py`; parser frontend: `npm run test:spotify`.
+
 ## Архитектура
 
 ```text
@@ -21,6 +109,7 @@ src/
   features/
     playlists/                Пользовательские плейлисты, доступ и обложки
     streaming/                HLS: маршруты, очередь PostgreSQL и фоновый воркер
+    spotify_int/              Импорт Spotify, скачивание yt-dlp отдельными jobs
     health/routes.zig         Проверка доступности процесса
     tracks/
       routes.zig              HTTP-контракт
@@ -571,13 +660,23 @@ breakpoint в `src/main.zig` или обработчике маршрута и �
 
 ## Проверки
 
+Из `backend/`:
+
 ```sh
 zig fmt --check build.zig src
 zig build
 zig build test --summary all
+zig build test -Dtest-filter="HLS publication" --summary all
 zig build test -Doptimize=ReleaseSafe --summary all
 zig build -Doptimize=ReleaseSafe
 ```
+
+При открытом корне репозитория панель VS Code **Testing → Run Test** использует
+`.vscode/settings.json`: `zig build test --build-file backend/build.zig
+-Dtest-filter=<имя теста>`. Прямой `zig test <файл>` не подключает модули из
+build.zig и может запрещать относительные импорты за пределами каталога файла.
+Расширение показывает тесты открытых Zig-файлов; для полного набора используйте
+задачу `Backend: test` либо команду `zig build test --summary all`.
 
 Тесты проверяют валидацию и HTTP-ошибки, UTC-даты, подпись SigV4 на фиксированном
 независимом примере, бинарный PUT, отказ хранилища и отмену зависшего запроса

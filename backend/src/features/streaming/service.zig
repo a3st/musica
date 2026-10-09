@@ -31,24 +31,24 @@ pub fn enqueue(db: *database.Database, arena: std.mem.Allocator, id: []const u8,
     return result;
 }
 
-pub fn claim(db: *database.Database, arena: std.mem.Allocator) !?model.PreparationTask {
+pub fn claim(db: *database.Database, arena: std.mem.Allocator) !?model.Task {
     const conn = try db.acquire();
     defer conn.release();
     const job = (try jobs_repository.claim(conn, arena, model.preparation_job_kind, 60)) orelse return null;
-    const payload = job.decodePayload(model.PreparationPayload, arena) catch |err| {
+    const payload = job.decodePayload(model.Payload, arena) catch |err| {
         try jobs_repository.fail(conn, job, false, 0);
         return err;
     };
     return .{ .job = job, .payload = payload };
 }
 
-pub fn heartbeat(db: *database.Database, task: model.PreparationTask) !void {
+pub fn heartbeat(db: *database.Database, task: model.Task) !void {
     const conn = try db.acquire();
     defer conn.release();
     try jobs_repository.heartbeat(conn, task.job, 60);
 }
 
-pub fn finish(db: *database.Database, task: model.PreparationTask, prefix: []const u8, segments: u32) !void {
+pub fn finish(db: *database.Database, task: model.Task, prefix: []const u8, segments: u32) !void {
     const conn = try db.acquire();
     defer conn.release();
     try conn.begin();
@@ -58,7 +58,7 @@ pub fn finish(db: *database.Database, task: model.PreparationTask, prefix: []con
     try conn.commit();
 }
 
-pub fn failed(db: *database.Database, task: model.PreparationTask, retry: bool) !void {
+pub fn failed(db: *database.Database, task: model.Task, retry: bool) !void {
     const conn = try db.acquire();
     defer conn.release();
     jobs_repository.fail(conn, task.job, retry, 30) catch |err| if (err != error.LeaseLost) return err;

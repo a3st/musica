@@ -32,7 +32,7 @@ pub fn run(app: *App) anyerror!void {
     }
 }
 
-fn prepare(app: *App, arena: std.mem.Allocator, task: model.PreparationTask) !void {
+fn prepare(app: *App, arena: std.mem.Allocator, task: model.Task) !void {
     const Result = union(enum) { output: anyerror!void, heartbeat: anyerror!void, timeout: anyerror!void };
     var buffer: [3]Result = undefined;
     var select = std.Io.Select(Result).init(app.storage.io, &buffer);
@@ -53,7 +53,7 @@ fn prepare(app: *App, arena: std.mem.Allocator, task: model.PreparationTask) !vo
     }
 }
 
-fn maintainLease(app: *App, task: model.PreparationTask) anyerror!void {
+fn maintainLease(app: *App, task: model.Task) anyerror!void {
     while (true) {
         try std.Io.sleep(app.storage.io, .fromSeconds(10), .awake);
         try service.heartbeat(&app.db, task);
@@ -64,7 +64,7 @@ fn timeout(io: std.Io, seconds: u32) anyerror!void {
     try std.Io.sleep(io, .fromSeconds(seconds), .awake);
 }
 
-fn convert(app: *App, arena: std.mem.Allocator, task: model.PreparationTask) anyerror!void {
+fn convert(app: *App, arena: std.mem.Allocator, task: model.Task) anyerror!void {
     if (!tracks_model.validId(task.payload.track_id) or !tracks_model.validId(task.job.attempt_id.?) or task.payload.size == 0 or task.payload.size > app.max_upload_bytes)
         return error.InvalidHlsOutput;
     const io = app.storage.io;

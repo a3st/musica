@@ -31,6 +31,8 @@ const members = new Map([[id(2), [...tracks]], [id(3), [tracks[0]]], [id(4), [tr
 const mutations = [];
 let authenticated = true;
 let nextId = 20;
+let spotifyImport = null;
+let spotifyFailed = true;
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
 const page = await context.newPage();
 const errors = [];
@@ -43,6 +45,21 @@ await page.route('**/api/**', async (route) => {
   if (path === '/api/auth/logout') { authenticated = false; return route.fulfill({ status: 204 }); }
   if (method !== 'GET') mutations.push({ method, path, body: request.headers()['content-type']?.includes('application/json') ? request.postDataJSON() : request.postData() });
   if (path === '/api/playlists' && method === 'GET') return json(playlists.map((p) => ({ ...p, track_count: members.get(p.id).length })));
+  if (path === '/api/spotify/import' && method === 'POST') {
+    const input = request.postDataJSON();
+    assert.equal(input.playlists[0].title, 'Spotify mix');
+    assert.equal(input.library[0].spotify_uri, input.playlists[0].tracks[0].spotify_uri);
+    const p = metadata(nextId++, input.playlists[0].title); playlists.push(p);
+    const t = { id: id(nextId++), owner_id: user.id, title: input.library[0].title, artist: input.library[0].artist, status: 'pending' };
+    tracks.push(t); members.get(id(2)).push(t); members.set(p.id, [t]);
+    spotifyImport = { id: id(nextId++), track: t };
+    return json({ id: spotifyImport.id, tracks: 1, playlists: [p.id] }, 202);
+  }
+  if (spotifyImport && path.startsWith('/api/spotify/imports/')) {
+    if (path.endsWith('/retry')) { spotifyFailed = false; spotifyImport.track.status = 'streamed'; }
+    const t = spotifyImport.track;
+    return json({ id: spotifyImport.id, tracks: [{ id: t.id, title: t.title, artist: t.artist, download: spotifyFailed ? 'failed' : 'completed', status: t.status, preparation: spotifyFailed ? null : 'completed' }] });
+  }
   if (path === '/api/playlists' && method === 'POST') {
     const p = { ...metadata(nextId++, ''), ...request.postDataJSON() }; playlists.push(p); members.set(p.id, []); return json({ id: p.id }, 201);
   }
@@ -64,8 +81,8 @@ await page.route('**/api/**', async (route) => {
     const t = tracks.find((t) => t.id === match[1]);
     if (method === 'DELETE') { for (const [key, list] of members) members.set(key, list.filter((t) => t.id !== match[1])); return route.fulfill({ status: 204 }); }
     if (match[2] === '/file') { t.status = 'ready'; return json({ status: t.status }); }
-    if (match[2] === '/hls' && method === 'POST') { t.status = 'streamed'; return json({ status: 'streamed', preparation: 'ready' }); }
-    if (match[2] === '/hls/status') return json({ status: t.status, preparation: t.status === 'pending' ? null : 'ready' });
+    if (match[2] === '/hls' && method === 'POST') { t.status = 'streamed'; return json({ status: 'streamed', preparation: 'completed' }); }
+    if (match[2] === '/hls/status') return json({ status: t.status, preparation: t.status === 'pending' ? null : 'completed' });
     if (match[2] === '/hls/index.m3u8') return route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: readFileSync(join(temporary, 'index.m3u8')) });
     if (/^\/hls\/segment-\d{6}\.ts$/.test(match[2])) return route.fulfill({ contentType: 'video/mp2t', body: readFileSync(join(temporary, match[2].split('/').at(-1))) });
   }
@@ -107,6 +124,24 @@ try {
   await page.locator('.sidebar [data-action="new-playlist"]').click();
   await page.locator('#playlist-form [name="title"]').fill('Новый плейлист');
   await page.locator('#playlist-form button').click(); await page.getByRole('heading', { name: 'Новый плейлист', exact: true }).waitFor();
+  await page.locator('.sidebar [data-action="spotify-import"]').click();
+  await page.locator('#spotify-files').setInputFiles([{ name: 'Broken.json', mimeType: 'application/json', buffer: Buffer.from('{broken') }]);
+  await page.getByText('Broken.json: некорректный JSON', { exact: true }).waitFor();
+  assert.equal(await page.locator('#spotify-start').isDisabled(), true);
+  const uri = 'spotify:track:0123456789012345678901';
+  await page.locator('#spotify-files').setInputFiles([
+    { name: 'Playlists.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ playlists: [{ name: 'Spotify mix', items: [{ track: { trackName: 'Get Lucky', artistName: 'Daft Punk', trackUri: uri } }] }] })) },
+    { name: 'YourLibrary.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ tracks: [{ track: 'Get Lucky', artist: 'Daft Punk', uri }] })) },
+  ]);
+  await page.getByText('1 уникальных треков · 1 плейлистов', { exact: true }).waitFor();
+  await page.locator('#spotify-start').click(); await page.locator('#spotify-retry').waitFor();
+  await page.locator('#spotify-retry').click(); await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
+  assert.equal(mutations.filter((m) => m.path === '/api/spotify/import').length, 1);
+  await page.locator('#spotify-dialog [data-close]').click();
+  await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  await page.locator('.sidebar [data-action="spotify-import"]').click();
+  await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
+  await page.locator('#spotify-dialog [data-close]').click();
   for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport); await overflow();
     assert.equal(await page.locator('.topbar [data-action="upload"]').isVisible(), false);
@@ -114,11 +149,16 @@ try {
     await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
     assert.equal(await page.locator('#library-dialog').isVisible(), false);
     await page.screenshot({ path: `../backend/.zig-cache/ui-mobile-${viewport.width}.png` });
+    await page.locator('#open-library').click(); await page.locator('#library-dialog [data-action="spotify-import"]').click();
+    await page.locator('#spotify-dialog[open]').waitFor(); await overflow();
+    assert.equal(await page.locator('#library-dialog').isVisible(), false);
+    await page.screenshot({ path: `../backend/.zig-cache/ui-spotify-${viewport.width}.png` });
+    await page.locator('#spotify-dialog [data-close]').click();
   }
   authenticated = false; await page.reload(); await page.locator('#auth-dialog[open]').waitFor(); await overflow();
   await page.locator('#auth-form [name="username"]').fill('music_lover');
   await page.locator('#auth-form [name="password"]').fill('test-password-123');
   await page.locator('#auth-submit').click(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: desktop/mobile layouts, search, escaped metadata, actual AAC HLS playback, upload queue, playlists, auth and both deletion modes.');
+  console.log('PASS: desktop/mobile layouts, search, escaped metadata, AAC HLS playback, uploads, Spotify JSON preview/import/retry, playlists, auth and both deletion modes.');
 } finally { await browser.close(); rmSync(temporary, { recursive: true, force: true }); }

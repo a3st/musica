@@ -9,6 +9,7 @@
     "build": "npm run check && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test:ui": "node tests/ui.mjs",
+    "test:spotify": "node tests/spotify.mjs",
     "test:pwa": "node tests/pwa.mjs",
     "test:proxy": "node tests/proxy.mjs"
   },

@@ -3,6 +3,7 @@ import { api, ApiError, errorMessage, type Playlist, type PlaylistSummary, type 
 import { escape, icon } from './icons';
 import { Player } from './player';
 import { Uploads } from './uploads';
+import { SpotifyImporter } from './spotify-import';
 import { $, dialog, renderShell, welcome } from './view';
 import './style.css';
 
@@ -46,6 +47,7 @@ function playerChanged(): void {
 }
 player = new Player(playerChanged, toast, () => user?.id ?? null);
 const uploads = new Uploads(() => ({ playlists, selected: selected?.id ?? null, defaultId: user?.default_playlist_id ?? null }), () => refresh(), toast);
+const spotify = new SpotifyImporter((id) => refresh(id), () => user?.id ?? null);
 function play(track: Track): void { playingCover = selected; void player.load(track, visibleTracks()); }
 async function selectPlaylist(id: string): Promise<void> {
   const requestVersion = ++version; $('#refresh').setAttribute('aria-busy', 'true');
@@ -62,9 +64,9 @@ async function refresh(id?: string): Promise<void> {
   const candidate = id ?? selected?.id ?? user.default_playlist_id;
   await selectPlaylist(playlists.some((p) => p.id === candidate) ? candidate : user.default_playlist_id);
 }
-async function openSession(): Promise<void> { user = await api.me(); await refresh(); dialog('auth-dialog').close(); }
+async function openSession(): Promise<void> { user = await api.me(); await refresh(); dialog('auth-dialog').close(); await spotify.restore(); }
 function requireLogin(): boolean { if (user) return true; dialog('auth-dialog').showModal(); return false; }
-function clearSession(): void { player.stop(); uploads.reset(); user = null; selected = null; playlists = []; version++; renderSidebar(); renderCollection(); document.title = 'Musica · Ваша музыка'; }
+function clearSession(): void { player.stop(); uploads.reset(); spotify.reset(); user = null; selected = null; playlists = []; version++; renderSidebar(); renderCollection(); document.title = 'Musica · Ваша музыка'; }
 document.addEventListener('error', (e) => { if (e.target instanceof HTMLImageElement) e.target.hidden = true; }, true);
 document.addEventListener('click', (e) => {
   const target = e.target; if (!(target instanceof Element)) return;
@@ -79,6 +81,7 @@ document.addEventListener('click', (e) => {
   if (action === 'login') dialog('auth-dialog').showModal();
   if (action === 'new-playlist' && requireLogin()) { dialog('library-dialog').close(); dialog('playlist-dialog').showModal(); }
   if (action === 'upload' && requireLogin()) uploads.open();
+  if (action === 'spotify-import' && requireLogin()) { dialog('library-dialog').close(); spotify.open(); }
   if (action === 'logout') {
     if (uploads.busy) { toast('Сначала завершите загрузку или отмените её'); return; }
     void api.logout().then(() => { clearSession(); location.reload(); }).catch((error: unknown) => toast(errorMessage(error)));
@@ -133,6 +136,7 @@ setInterval(() => {
   void (async () => {
     try {
       await uploads.poll();
+      await spotify.poll();
       if (selected?.tracks.some((t) => t.status !== 'streamed')) {
         const id = selected.id; const requestVersion = version; const updated = await api.playlist(id);
         if (selected?.id === id && version === requestVersion && JSON.stringify(updated.tracks) !== JSON.stringify(selected.tracks)) { selected = updated; renderCollection(); }

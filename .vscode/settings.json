@@ -1,0 +1,11 @@
+{
+  "zig.testArgs": [
+    "build",
+    "test",
+    "--build-file",
+    "backend/build.zig",
+    "-Dtest-filter=${filter}",
+    "--summary",
+    "all"
+  ]
+}

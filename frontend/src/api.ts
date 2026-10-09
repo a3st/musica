@@ -4,6 +4,7 @@ export interface PlaylistSummary { id: string; owner_id: string; title: string; 
 export interface Playlist { id: string; owner_id: string; title: string; description: string; visibility: PlaylistSummary['visibility']; is_default: boolean; image_key: string | null; tracks: Track[] }
 export interface User { id: string; username: string; default_playlist_id: string }
 export interface HlsState { status: TrackStatus; preparation: 'queued' | 'processing' | 'completed' | 'failed' | null }
+export interface SpotifyImportStatus { id: string; tracks: { id: string; title: string; artist: string; download: 'queued' | 'processing' | 'completed' | 'failed'; status: TrackStatus | null; preparation: HlsState['preparation'] }[] }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) { super(code); }
@@ -41,6 +42,13 @@ export async function request(path: string, init: RequestInit = {}): Promise<unk
 }
 const json = (body: unknown): RequestInit => ({ headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 export const api = {
+  async importSpotify(input: import('./spotify').SpotifyImport): Promise<{ id: string; tracks: number; playlists: string[] }> {
+    const r = record(await request('/spotify/import', { method: 'POST', signal: AbortSignal.timeout(120000), ...json(input) }));
+    if (!Array.isArray(r.playlists) || typeof r.tracks !== 'number' || !Number.isSafeInteger(r.tracks) || r.tracks < 0) throw new Error('Некорректный результат импорта');
+    return { id: uuid(r.id), tracks: r.tracks, playlists: r.playlists.map(uuid) };
+  },
+  async spotifyImportStatus(id: string): Promise<SpotifyImportStatus> { return spotifyStatus(await request(`/spotify/imports/${id}`)); },
+  async retrySpotifyImport(id: string): Promise<SpotifyImportStatus> { return spotifyStatus(await request(`/spotify/imports/${id}/retry`, { method: 'POST' })); },
   async me(): Promise<User> { const r = record(await request('/users/me')); return { id: uuid(r.id), username: text(r.username), default_playlist_id: uuid(r.default_playlist_id) }; },
   async signIn(username: string, password: string, register: boolean): Promise<void> {
     const r = record(await request(register ? '/auth/register' : '/auth/login', { method: 'POST', ...json({ username, password }) }));
@@ -76,6 +84,14 @@ export const api = {
 function hlsState(data: unknown): HlsState {
   const r = record(data);
   return { status: choice(r.status, ['pending', 'ready', 'streamed']), preparation: r.preparation === null ? null : choice(r.preparation, ['queued', 'processing', 'completed', 'failed'] as const) };
+}
+function spotifyStatus(data: unknown): SpotifyImportStatus {
+  const r = record(data);
+  if (!Array.isArray(r.tracks)) throw new Error('Некорректный статус импорта');
+  return { id: uuid(r.id), tracks: r.tracks.map((value: unknown) => {
+    const t = record(value);
+    return { id: uuid(t.id), title: text(t.title), artist: text(t.artist), download: choice(t.download, ['queued', 'processing', 'completed', 'failed'] as const), status: t.status === null ? null : choice(t.status, ['pending', 'ready', 'streamed'] as const), preparation: t.preparation === null ? null : choice(t.preparation, ['queued', 'processing', 'completed', 'failed'] as const) };
+  }) };
 }
 export function uploadFile(id: string, file: File, progress: (percent: number) => void, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

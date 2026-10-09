@@ -12,8 +12,7 @@
       "preLaunchTask": "Backend: build Debug",
       "symbolSearchPath": "${workspaceFolder}/backend/zig-out/debug/bin",
       "requireExactSource": true,
-      "stopAtEntry": false,
-      "externalConsole": false
+      "stopAtEntry": false
     }
   ]
 }

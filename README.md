@@ -8,6 +8,11 @@ Frontend — адаптивное PWA: плейлисты, поиск, HLS-пл�
 и сессии, плейлисты с ролями, PostgreSQL и MinIO, подготовку HLS через FFmpeg.
 Описание интерфейса и проверки — в [frontend/README.md](frontend/README.md).
 
+В медиатеке доступен **Импорт из Spotify**: выберите `Playlists.json` и/или
+`YourLibrary.json` из выгрузки данных аккаунта. Backend создаёт треки и приватные
+плейлисты, скачивает аудио отдельными jobs через yt-dlp и автоматически готовит HLS.
+Требования и контракт — в [backend/README.md](backend/README.md#импорт-spotify).
+
 ## Структура
 
 ```text
@@ -16,7 +21,7 @@ frontend/             TypeScript + Vite, PWA
   public/             Иконки приложения
 backend/              Zig 0.16.0 + http.zig
   src/main.zig        Инициализация и регистрация фич
-  src/features/       auth, users, playlists, tracks, streaming, health
+  src/features/       auth, users, playlists, tracks, streaming, spotify_int, health
   src/infrastructure/ PostgreSQL, S3/MinIO и общая очередь jobs
   migrations/         SQL-миграции для ручного выполнения
   build.zig           Сборка и запуск
@@ -31,6 +36,7 @@ AGENTS.md             Инструкции по работе с кодом
 - PostgreSQL 14+ и MinIO для backend. Настройка окружения, ручные миграции
   и HTTP-контракты описаны в [backend/README.md](backend/README.md).
 - FFmpeg — для подготовки треков к воспроизведению; в Docker-образ уже включён.
+- yt-dlp и Node.js 22+ на backend — для импорта Spotify; Docker-образ включает их.
 - Интернет при первой установке npm- и Zig-зависимостей.
 
 Backend использует [karlseguin/http.zig](https://github.com/karlseguin/http.zig),
@@ -108,6 +114,7 @@ zig build -Doptimize=ReleaseSafe
 - `Frontend: install` — установка зависимостей через `npm ci` (перед первым запуском).
 - `Backend: build` / `Frontend: build` — сборка выбранного подпроекта.
 - `Backend: build ReleaseSafe` — оптимизированная сборка backend.
+- `Backend: test` — все unit-тесты backend с итоговой сводкой.
 - `Backend: run` / `Frontend: run` — запуск выбранного подпроекта.
 - `Build: all` — параллельная сборка обоих подпроектов, также по **Ctrl+Shift+B**.
 - `Run: all` — одновременный запуск backend и frontend в отдельных терминалах.
@@ -115,6 +122,12 @@ zig build -Doptimize=ReleaseSafe
 Остановка серверов: **Terminal → Terminate Task** либо **Ctrl+C** в их терминалах.
 Zig и npm должны быть доступны в PATH; на Windows задачи используют `npm.cmd`.
 Формат задач описан в [документации VS Code](https://code.visualstudio.com/docs/debugtest/tasks).
+
+Панель **Testing → Run Test** настроена через `.vscode/settings.json`: вместо
+`zig test <файл>` она использует `backend/build.zig` и передаёт имя выбранного
+теста в `-Dtest-filter`. Так учитываются модули httpz/pg и остальные настройки
+сборки. Для всего набора запускайте задачу `Backend: test`;
+панель расширения обнаруживает тесты в открытых Zig-файлах.
 
 ## PWA и self-hosting
 
