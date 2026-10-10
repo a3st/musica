@@ -163,13 +163,13 @@ YTDLP_PATH=D:\source\musica\backend\.venv\Scripts\yt-dlp.exe
 FFMPEG_PATH=C:\Program Files\FFmpeg\bin\ffmpeg.exe
 SPOTIFY_WORKER_ENABLED=true
 SPOTIFY_TIMEOUT_SECONDS=900
-# SPOTIFY_TMP_DIR=D:\temp\musica-spotify
+# IMPORTS_TMP_DIR=D:\temp\musica-imports
 ```
 
 `FFMPEG_PATH` передаётся также в `--ffmpeg-location`; FFprobe должен находиться рядом.
 По умолчанию yt-dlp ищется в PATH, timeout — 900 секунд (1–3600), worker включён.
-Временный корень берётся из SPOTIFY_TMP_DIR, затем TEMP или /tmp/musica-spotify.
-Контейнер использует /tmp/musica-spotify. Нодам нужны доступ к Интернету,
+Временный корень берётся из IMPORTS_TMP_DIR, затем TEMP или /tmp/musica-imports.
+Контейнер использует /tmp/musica-imports. Нодам нужны доступ к Интернету,
 общим PostgreSQL и MinIO; общая локальная файловая система не требуется.
 
 Формат выгрузки описан в [Spotify](https://support.spotify.com/in-en/article/understanding-your-data/),
@@ -188,14 +188,16 @@ src/
     api.zig                   HTTP-ошибки и разбор JSON
   infrastructure/
     database.zig              Database/Connection, скрытый драйвер и пул PostgreSQL
-    repositories/             SQL auth, playlists, tracks, streaming
+    repositories/             SQL auth, playlists, tracks, streaming, imports, web_int
     jobs/                     Общая модель Job и репозиторий jobs
+    media/                    Probe, FFmpeg и модель технических метаданных аудио
     s3.zig                    S3-клиент для MinIO
   features/
     capabilities/             Итоговые возможности сервера для интерфейса
     playlists/                Пользовательские плейлисты, доступ и обложки
     streaming/                HLS: маршруты, очередь PostgreSQL и фоновый воркер
-    spotify_int/              Импорт Spotify, скачивание yt-dlp отдельными jobs
+    spotify_int/              Разбор импорта Spotify и создание плейлистов
+    imports/                  Общая очередь скачивания треков через yt-dlp
     health/routes.zig         Проверка доступности процесса
     tracks/
       routes.zig              HTTP-контракт
@@ -215,16 +217,19 @@ service координирует операции, feature/repository задаё
 `tracks/repository.create` создаёт только запись личного трека;
 `tracks/service.create` отдельно добавляет её в Uploads и дополнительные
 плейлисты в той же транзакции.
-`web_int/service.ensureDownload` проверяет метаданные, получает сервисного
-владельца и вызывает `web_int/repository.getOrCreateCatalogTrack` для создания
+`imports/service.enqueueTrack` проверяет метаданные, получает сервисного
+владельца и вызывает `imports/repository.getOrCreateSharedTrack` для создания
 или дедупликации общего трека, затем ставит `download_track` в очередь.
-Модели `CatalogTrack` и `Source`, а также поиск загруженных сервисных треков
-принадлежат web_int; добавление в Uploads выполняется отдельно.
+Модели `Track`, `Source`, payload и выполнение скачивания принадлежат imports;
+поиск загруженных сервисных треков и работа с каталогом остаются в web_int.
+Добавление в Uploads выполняется отдельно.
 SQL личного создания находится в infrastructure/repositories/tracks.zig,
-общего — в infrastructure/repositories/web_int.zig. Предполагаемый S3-путь
+общего — в infrastructure/repositories/imports.zig. Предполагаемый S3-путь
 формируется одинаково для обоих видов треков.
 Публикация исходников, обработка метаданных и очистка файлов остаются в tracks;
-worker web_int загружает скачанный файл через `tracks/service.uploadForJob`.
+worker imports загружает скачанный файл через `tracks/service.uploadForJob`.
+Фасад imports использует infrastructure/repositories/imports.zig для создания
+общих треков и чтения их статуса; SQL поиска и кеша остаётся в web_int.zig.
 `tracks/operations.remove` проверяет владельца и активные задания, ставит файлы
 на очистку и удаляет запись трека. Вызывающий сервис управляет транзакцией:
 `tracks/service.remove` использует операцию для прямого удаления,
@@ -373,12 +378,15 @@ HTTP-сервер заранее выделяет четыре буфера по
 из окружения или корневого `.env`. Если обе пустые или не заданы, создание
 стартового администратора отключено; задание только одной — ошибка конфигурации.
 Worker скачивания обслуживает Spotify и Web; текущие имена его настроек
-`SPOTIFY_WORKER_ENABLED`, `SPOTIFY_TIMEOUT_SECONDS` и `SPOTIFY_TMP_DIR` сохранены.
+`SPOTIFY_WORKER_ENABLED` и `SPOTIFY_TIMEOUT_SECONDS` сохранены.
+Временный каталог задаётся через `IMPORTS_TMP_DIR`.
 
 Флаги интеграций читаются при запуске; после изменения перезапустите backend.
 Если `WEB_INT_ENABLED=false`, а `SPOTIFY_INT_ENABLED=true`, сервер пишет warning
 и отключает Spotify. Маршруты выключенных интеграций не регистрируются и возвращают
-404. Worker скачивания запускается только при включённых `WEB_INT_ENABLED` и
+404. Imports работает только при одновременно включённых `WEB_INT_ENABLED` и
+`SPOTIFY_INT_ENABLED`. При выключении хотя бы одного флага новые загрузки запрещены
+(`503`, `imports_disabled`), worker не запускается. Для запуска worker также нужен
 `SPOTIFY_WORKER_ENABLED`; уже созданные задания сохраняются для возобновления
 после включения. Очистка файлов и неиспользуемых сервисных треков продолжает работать.
 
@@ -388,9 +396,12 @@ Worker скачивания обслуживает Spotify и Web; текущи�
 {"web_search": true, "spotify_import": true}
 ```
 
-Ответ не кешируется. Frontend скрывает импорт Spotify и отключает Web-поиск
-по этим флагам; поиск пользовательских треков, ручная загрузка и воспроизведение
-остаются доступны.
+Ответ не кешируется. Frontend скрывает отключённый Spotify и отключает Web-поиск
+по этим флагам. Если Spotify выключен, включённый Web продолжает поиск по каталогу.
+Исходные ссылки результатов доступны, но скачивание и воспроизведение новых
+каталожных треков недоступны.
+Поиск пользовательских треков, ручная загрузка и воспроизведение уже загруженных
+треков остаются доступны.
 
 `S3_ENDPOINT` указывает на S3 API, а не на web console MinIO. Поддерживаются
 HTTP/HTTPS и path-style URL; endpoint должен быть без пути, query и credentials.
@@ -525,7 +536,7 @@ Worker использует аренду 60 секунд и продлевает
 
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
-| `FFPROBE_PATH` | `ffprobe` | При явном `FFMPEG_PATH` с каталогом ищется рядом с FFmpeg; можно задать отдельный путь |
+| `FFPROBE_PATH` | `ffprobe` | Имя исполняемого файла из PATH или полный путь; задаётся независимо от `FFMPEG_PATH` |
 | `TRACK_METADATA_WORKER_ENABLED` | `true` | Отключение worker не отключает выдачу обложек |
 | `TRACK_METADATA_TIMEOUT_SECONDS` | `120` | Общий дедлайн, от 1 до 3600 секунд |
 | `TRACK_METADATA_TMP_DIR` | Windows: `TEMP`; иначе `/tmp/musica-metadata` | Временный каталог обработки |

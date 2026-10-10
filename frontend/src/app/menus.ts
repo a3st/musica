@@ -86,13 +86,14 @@ export function webTrackMenu(app: Application, track: SearchTrack): MenuItem[] {
       label: t('web.addToUploads'),
       icon: 'plus',
       group: 'organize',
+      disabled: !app.importsEnabled,
       action: () => app.run(app.addWebTrack(track)),
     },
     {
       label: t('tracks.addToPlaylist'),
       icon: 'plus',
       group: 'organize',
-      disabled: !targets.length,
+      disabled: !app.importsEnabled || !targets.length,
       children: targets.map((playlist) => ({
         label: playlist.title,
         icon: 'library',

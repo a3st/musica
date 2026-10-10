@@ -68,6 +68,7 @@ export const english = {
   'common.or': 'or',
   'common.save': 'Save',
   'errors.actionFailed': 'Unable to complete this action',
+  'errors.importsDisabled': 'Track imports are disabled on this server',
   'errors.connection': 'Unable to connect to the server',
   'errors.invalidData': 'Server returned invalid data',
   'errors.invalidId': 'Invalid ID in server response',

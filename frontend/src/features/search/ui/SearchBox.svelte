@@ -12,6 +12,7 @@
   let {
     state: controller,
     language,
+    importsEnabled,
     play,
     add,
     playWeb,
@@ -25,6 +26,7 @@
   }: {
     state: SearchState;
     language: LanguageState;
+    importsEnabled: boolean;
     play: (result: LocalResult) => void;
     add: (track: SearchTrack) => void;
     playWeb: (track: SearchTrack) => void;
@@ -190,6 +192,7 @@
               <button
                 class="search-result-art"
                 disabled={waiting ||
+                  (result.kind === 'web' && !importsEnabled) ||
                   (result.kind === 'local' && result.result.track.status === 'pending')}
                 aria-label={language.t('tracks.play', { title: track.title })}
                 aria-busy={waiting}
@@ -216,6 +219,7 @@
               <button
                 class="search-result-action"
                 disabled={waiting ||
+                  (result.kind === 'web' && !importsEnabled) ||
                   (result.kind === 'local' && result.result.track.status === 'pending')}
                 aria-label={language.t('tracks.play', {
                   title: track.title,
@@ -249,7 +253,8 @@
                 >
                 <button
                   class="icon-button search-result-add"
-                  disabled={!!controller.web.additions[searchTrackKey(result.track)]}
+                  disabled={!importsEnabled ||
+                    !!controller.web.additions[searchTrackKey(result.track)]}
                   aria-label={controller.web.additions[searchTrackKey(result.track)] === 'added'
                     ? language.t('web.added')
                     : language.t('web.addTrack', { title: track.title })}

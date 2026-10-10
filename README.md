@@ -21,7 +21,7 @@ frontend/             Svelte 5 + TypeScript + Vite, PWA
   public/             Иконки приложения
 backend/              Zig 0.16.0 + http.zig
   src/main.zig        Инициализация и регистрация фич
-  src/features/       auth, users, playlists, tracks, streaming, spotify_int, web_int, capabilities, health
+  src/features/       auth, users, playlists, tracks, streaming, spotify_int, web_int, imports, capabilities, health
   src/infrastructure/ PostgreSQL, S3/MinIO и общая очередь jobs
   migrations/         SQL-миграции для ручного выполнения
   build.zig           Сборка и запуск

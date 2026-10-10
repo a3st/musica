@@ -117,65 +117,7 @@ fn convertAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) anye
         try dir.writeFile(io, .{ .sub_path = "source", .data = source });
     }
 
-    var child = try spawnFfmpeg(io, .{
-        .argv = &.{
-            app.ffmpeg_path,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-y",
-
-            "-protocol_whitelist",
-            "file,pipe",
-            "-format_whitelist",
-            "mp3,flac,wav,ogg,aac,mov,matroska,webm",
-            "-i",
-            "source",
-            "-map",
-            "0:a:0",
-            "-vn",
-            "-sn",
-            "-dn",
-
-            "-threads",
-            "1",
-            "-filter_threads",
-            "1",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-ac",
-            "2",
-            "-ar",
-            "48000",
-
-            "-f",
-            "hls",
-            "-hls_time",
-            "6",
-            "-hls_playlist_type",
-            "vod",
-            "-hls_list_size",
-            "0",
-            "-hls_segment_filename",
-            "segment-%06d.ts",
-            "index.m3u8",
-        },
-        .cwd = .{ .dir = dir },
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .inherit,
-        .create_no_window = true,
-    });
-    defer child.kill(io);
-
-    const term = try child.wait(io);
-    switch (term) {
-        .exited => |code| if (code != 0) return error.TranscodingFailed,
-        else => return error.TranscodingFailed,
-    }
+    try app.ffmpeg.prepareHls(io, dir, "source", "index.m3u8", "segment-%06d.ts");
 
     const manifest = try dir.readFileAlloc(io, "index.m3u8", arena, .limited(model.max_manifest_bytes));
     const count = try model.segmentCount(manifest);
@@ -199,28 +141,4 @@ fn convertAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) anye
 
     try service.publishHls(&app.db, task, prefix, count);
     std.log.info("HLS published for {s}: {d} segments", .{ task.payload.track_id, count });
-}
-
-/// Запускает FFmpeg без shell; отсутствие исполняемого файла переводит в FfmpegNotFound.
-fn spawnFfmpeg(io: std.Io, options: std.process.SpawnOptions) !std.process.Child {
-    return std.process.spawn(io, options) catch |err| {
-        if (err == error.Canceled) return err;
-        std.log.warn(
-            "Cannot launch FFmpeg at '{s}': {s}. FFMPEG_PATH must name an executable file, not its directory.",
-            .{ options.argv[0], @errorName(err) },
-        );
-        if (err == error.FileNotFound) return error.FfmpegNotFound;
-
-        return err;
-    };
-}
-
-test "missing FFmpeg executable has a distinct preparation error" {
-    try std.testing.expectError(error.FfmpegNotFound, spawnFfmpeg(std.testing.io, .{
-        .argv = &.{"musica-nonexistent-ffmpeg-0f87633b/ffmpeg"},
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .create_no_window = true,
-    }));
 }

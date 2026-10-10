@@ -3,6 +3,8 @@ const httpz = @import("httpz");
 const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
 const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
+const Probe = @import("infrastructure/media/probe.zig").Probe;
+const FFmpeg = @import("infrastructure/media/ffmpeg.zig").FFmpeg;
 const api = @import("helpers/api.zig");
 const capabilities_model = @import("features/capabilities/model.zig");
 
@@ -21,18 +23,22 @@ pub const App = struct {
     storage: S3,
     /// Общий клиент каталога; освобождается после остановки HTTP-сервера.
     catalog: Catalog,
+    /// Анализатор аудио с настроенным путём к ffprobe.
+    probe: Probe,
+    /// Обработчик аудио и обложек с настроенным путём к FFmpeg.
+    ffmpeg: FFmpeg,
 
     /// Максимальный размер тела запроса и загружаемого файла в байтах.
     max_upload_bytes: usize,
 
-    ffmpeg_path: []const u8,
-    ffprobe_path: []const u8,
     metadata_tmp_dir: []const u8,
     metadata_timeout_seconds: u32,
     ytdlp_path: []const u8,
 
-    spotify_tmp_dir: []const u8,
-    spotify_timeout_seconds: u32,
+    /// Разрешает импорт только при одновременно включённых Web и Spotify.
+    imports_enabled: bool,
+    imports_tmp_dir: []const u8,
+    imports_timeout_seconds: u32,
 
     hls_tmp_dir: []const u8,
     hls_timeout_seconds: u32,

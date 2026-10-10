@@ -32,6 +32,7 @@
   <SearchBox
     state={app.search}
     language={app.language}
+    importsEnabled={app.importsEnabled}
     play={(result) => app.run(app.playSearchResult(result))}
     playWeb={(track) => app.run(app.playWebTrack(track))}
     menu={(track, origin) => app.showWebTrackMenu(track, origin)}

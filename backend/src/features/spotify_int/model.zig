@@ -1,5 +1,5 @@
 const std = @import("std");
-const web_int_model = @import("../web_int/model.zig");
+const imports_model = @import("../imports/model.zig");
 const playlists_model = @import("../playlists/model.zig");
 
 /// Лимит общего числа записей треков в плейлистах и библиотеке до дедупликации.
@@ -57,7 +57,7 @@ pub fn validateImport(input: Import) !void {
 
 /// Проверяет название, исполнителя и необязательный URI трека Spotify.
 pub fn validateTrack(track: Track) !void {
-    _ = try web_int_model.validateTrack(.{ .title = track.title, .artist = track.artist });
+    _ = try imports_model.validateTrack(.{ .title = track.title, .artist = track.artist });
 
     if (track.spotify_uri) |uri| {
         const prefix = "spotify:track:";

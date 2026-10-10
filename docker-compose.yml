@@ -79,7 +79,7 @@ services:
       WEB_INT_ENABLED: ${WEB_INT_ENABLED}
       SPOTIFY_INT_ENABLED: ${SPOTIFY_INT_ENABLED}
       SPOTIFY_TIMEOUT_SECONDS: ${SPOTIFY_TIMEOUT_SECONDS}
-      SPOTIFY_TMP_DIR: /tmp/musica-spotify
+      IMPORTS_TMP_DIR: /tmp/musica-imports
     ports:
       - "127.0.0.1:${BACKEND_PORT}:8080"
     depends_on:

@@ -22,9 +22,9 @@ pub const Config = struct {
     /// Разрешает импорт Spotify; при выключенном Web принудительно становится false.
     spotify_int_enabled: bool,
 
-    spotify_tmp_dir: []const u8,
-    spotify_worker_enabled: bool,
-    spotify_timeout_seconds: u32,
+    imports_tmp_dir: []const u8,
+    imports_worker_enabled: bool,
+    imports_timeout_seconds: u32,
 
     hls_tmp_dir: []const u8,
     hls_worker_enabled: bool,
@@ -37,6 +37,11 @@ pub const Config = struct {
 
     /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
     shared_track_retention_seconds: u32,
+
+    /// Общий импорт работает только при включённых Web и Spotify.
+    pub fn importsEnabled(self: Config) bool {
+        return self.web_int_enabled and self.spotify_int_enabled;
+    }
 
     /// Читает окружение, подставляет значения по умолчанию и проверяет ограничения.
     /// Учётные данные стартового администратора должны быть заданы вместе; пустая пара отключает создание.
@@ -57,9 +62,9 @@ pub const Config = struct {
             .web_int_enabled = try parseBoolean(env.get("WEB_INT_ENABLED") orelse "true"),
             .spotify_int_enabled = try parseBoolean(env.get("SPOTIFY_INT_ENABLED") orelse "true"),
 
-            .spotify_tmp_dir = env.get("SPOTIFY_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-spotify",
-            .spotify_worker_enabled = try parseBoolean(env.get("SPOTIFY_WORKER_ENABLED") orelse "true"),
-            .spotify_timeout_seconds = try std.fmt.parseInt(u32, env.get("SPOTIFY_TIMEOUT_SECONDS") orelse "900", 10),
+            .imports_tmp_dir = env.get("IMPORTS_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-imports",
+            .imports_worker_enabled = try parseBoolean(env.get("SPOTIFY_WORKER_ENABLED") orelse "true"),
+            .imports_timeout_seconds = try std.fmt.parseInt(u32, env.get("SPOTIFY_TIMEOUT_SECONDS") orelse "900", 10),
 
             .hls_tmp_dir = env.get("HLS_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-hls",
             .hls_worker_enabled = try parseBoolean(env.get("HLS_WORKER_ENABLED") orelse "true"),
@@ -83,8 +88,8 @@ pub const Config = struct {
         if (config.max_upload_bytes == 0 or config.max_upload_bytes > 512 * 1024 * 1024)
             return error.InvalidConfiguration;
 
-        if (config.ytdlp_path.len == 0 or config.spotify_tmp_dir.len == 0 or
-            config.spotify_timeout_seconds == 0 or config.spotify_timeout_seconds > 3600)
+        if (config.ytdlp_path.len == 0 or config.imports_tmp_dir.len == 0 or
+            config.imports_timeout_seconds == 0 or config.imports_timeout_seconds > 3600)
             return error.InvalidConfiguration;
 
         if (config.ffmpeg_path.len == 0 or config.hls_tmp_dir.len == 0 or
@@ -141,12 +146,18 @@ test "Spotify is disabled when Web is disabled and integration flags reject inva
     const disabled = try Config.load(&env);
     try std.testing.expect(!disabled.web_int_enabled);
     try std.testing.expect(!disabled.spotify_int_enabled);
+    try std.testing.expect(!disabled.importsEnabled());
 
     try env.put("WEB_INT_ENABLED", "true");
     try env.put("SPOTIFY_INT_ENABLED", "false");
     const web_only = try Config.load(&env);
     try std.testing.expect(web_only.web_int_enabled);
     try std.testing.expect(!web_only.spotify_int_enabled);
+    try std.testing.expect(!web_only.importsEnabled());
+
+    try env.put("SPOTIFY_INT_ENABLED", "true");
+    const both_enabled = try Config.load(&env);
+    try std.testing.expect(both_enabled.importsEnabled());
 
     try env.put("SPOTIFY_INT_ENABLED", "yes");
     try std.testing.expectError(error.InvalidConfiguration, Config.load(&env));

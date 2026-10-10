@@ -27,7 +27,14 @@ export interface Confirmation {
   remove: () => Promise<void>;
 }
 export class Application {
-  capabilities = $state<Capabilities>({ web_search: false, spotify_import: false });
+  capabilities = $state<Capabilities>({
+    web_search: false,
+    spotify_import: false,
+  });
+  get importsEnabled(): boolean {
+    return this.capabilities.web_search && this.capabilities.spotify_import;
+  }
+
   readonly auth = new AuthState();
   readonly library = new PlaylistsState();
   readonly language = new LanguageState();
@@ -201,6 +208,7 @@ export class Application {
   }
 
   async addWebTrack(track: SearchTrack, playlistId?: string): Promise<void> {
+    if (!this.importsEnabled) return;
     if (!this.requireLogin()) return;
     this.search.remember({ kind: 'web', track });
     const version = this.sessionVersion;
@@ -214,6 +222,7 @@ export class Application {
   }
 
   async playWebTrack(track: SearchTrack): Promise<void> {
+    if (!this.importsEnabled) return;
     const user = this.auth.user;
     if (!this.requireLogin() || !user) return;
     this.search.remember({ kind: 'web', track });

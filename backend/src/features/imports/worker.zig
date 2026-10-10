@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const App = @import("../../app.zig").App;
+const FFmpeg = @import("../../infrastructure/media/ffmpeg.zig").FFmpeg;
 const model = @import("model.zig");
 const service = @import("service.zig");
 const repository = @import("repository.zig");
@@ -11,6 +12,8 @@ const streaming_service = @import("../streaming/service.zig");
 /// Обрабатывает очередь скачивания до отмены; при отсутствии работы ждёт секунду, при ошибке очереди — пять.
 /// Ошибки задачи фиксирует через сервис с выбором допустимости повтора.
 pub fn run(app: *App) anyerror!void {
+    if (!app.imports_enabled) return;
+
     const io = app.storage.io;
 
     while (true) {
@@ -19,7 +22,7 @@ pub fn run(app: *App) anyerror!void {
 
         const task = service.claim(&app.db, arena.allocator()) catch |err| {
             if (err == error.Canceled) return err;
-            std.log.err("Web queue unavailable: {s}", .{@errorName(err)});
+            std.log.err("Import queue unavailable: {s}", .{@errorName(err)});
 
             try std.Io.sleep(io, .fromSeconds(5), .awake);
             continue;
@@ -28,13 +31,13 @@ pub fn run(app: *App) anyerror!void {
         if (task) |value| {
             processTask(app, arena.allocator(), value) catch |err| {
                 if (err == error.Canceled) return err;
-                std.log.err("Web download failed for {s}, attempt {s}: {s}", .{ value.payload.track_id, value.job.attempt_id.?, @errorName(err) });
+                std.log.err("Import download failed for {s}, attempt {s}: {s}", .{ value.payload.track_id, value.job.attempt_id.?, @errorName(err) });
                 const retryable = err != error.FileNotFound and
                     err != error.InvalidInput and
                     err != error.InvalidText and
                     err != error.TrackNotFound and
                     err != error.FileTooLarge;
-                service.failTask(&app.db, value, retryable) catch |failure| std.log.err("Web job failure update failed: {s}", .{@errorName(failure)});
+                service.fail(&app.db, value, retryable) catch |failure| std.log.err("Import job failure update failed: {s}", .{@errorName(failure)});
             };
         } else try std.Io.sleep(io, .fromSeconds(1), .awake);
     }
@@ -54,7 +57,7 @@ fn processTask(app: *App, arena: std.mem.Allocator, task: model.Task) !void {
 
     try select.concurrent(.output, downloadAndPublish, .{ app, arena, task });
     try select.concurrent(.heartbeat, maintainLease, .{ app, task });
-    try select.concurrent(.timeout, waitForTimeout, .{ app.storage.io, app.spotify_timeout_seconds });
+    try select.concurrent(.timeout, waitForTimeout, .{ app.storage.io, app.imports_timeout_seconds });
 
     switch (try select.await()) {
         .output => |result| try result,
@@ -86,7 +89,7 @@ fn waitForTimeout(io: std.Io, seconds: u32) anyerror!void {
 
 /// Формирует поиск до пяти кандидатов и сохранение одного MP3 256K с метаданными и обложкой.
 /// Поисковая строка передаётся одним аргументом без shell; результат выделяется в arena.
-pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.CatalogTrack) ![]const []const u8 {
+pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.Track) ![]const []const u8 {
     _ = try model.validateTrack(track);
 
     const query = try std.fmt.allocPrint(arena, "ytsearch5:{s} {s}", .{
@@ -128,7 +131,7 @@ pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.Cat
         "--write-thumbnail",
 
         "--ffmpeg-location",
-        app.ffmpeg_path,
+        app.ffmpeg.path,
         "--output",
         "source.%(ext)s",
         "--",
@@ -153,14 +156,14 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
     if (state == .pending) {
         const io = app.storage.io;
 
-        var root = try std.Io.Dir.cwd().createDirPathOpen(io, app.spotify_tmp_dir, .{});
+        var root = try std.Io.Dir.cwd().createDirPathOpen(io, app.imports_tmp_dir, .{});
         defer root.close(io);
         const permissions: std.Io.Dir.Permissions = if (builtin.os.tag == .windows) .default_dir else .fromMode(0o700);
         try root.createDir(io, task.job.attempt_id.?, permissions);
         defer {
             const protection = io.swapCancelProtection(.blocked);
             defer _ = io.swapCancelProtection(protection);
-            root.deleteTree(io, task.job.attempt_id.?) catch |err| std.log.warn("Web scratch cleanup failed: {s}", .{@errorName(err)});
+            root.deleteTree(io, task.job.attempt_id.?) catch |err| std.log.warn("Import scratch cleanup failed: {s}", .{@errorName(err)});
         }
 
         var dir = try root.openDir(io, task.job.attempt_id.?, .{});
@@ -207,8 +210,8 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
 
     // A retry after successful publication resumes here instead of downloading twice.
     _ = try streaming_service.enqueue(&app.db, arena, task.payload.track_id, task.payload.user_id);
-    try service.completeTask(&app.db, task);
-    std.log.info("Web track downloaded and HLS queued: {s}", .{task.payload.track_id});
+    try service.complete(&app.db, task);
+    std.log.info("Import track downloaded and HLS queued: {s}", .{task.payload.track_id});
 }
 
 test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single argument" {
@@ -217,7 +220,7 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
 
     var app: App = undefined;
     app.max_upload_bytes = 1024;
-    app.ffmpeg_path = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe";
+    app.ffmpeg = FFmpeg.init("C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe");
     app.ytdlp_path = "yt-dlp";
     const argv = try buildYtdlpArguments(&app, arena.allocator(), .{ .title = "Title \"; echo hi", .artist = "Artist" });
     try std.testing.expectEqualStrings("ytsearch5:Artist Title \"; echo hi", argv[argv.len - 1]);
@@ -229,4 +232,11 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
         if (std.mem.eql(u8, arg, "--embed-thumbnail")) cover = true;
     }
     try std.testing.expect(bitrate and cover);
+}
+
+test "disabled imports do not claim jobs or launch external processes" {
+    var app: App = undefined;
+    app.imports_enabled = false;
+
+    try run(&app);
 }

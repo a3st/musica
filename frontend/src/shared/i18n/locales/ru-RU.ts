@@ -65,6 +65,7 @@ export const russian = {
   'common.or': 'или',
   'common.save': 'Сохранить',
   'errors.actionFailed': 'Не удалось выполнить действие',
+  'errors.importsDisabled': 'Импорт треков отключён на этом сервере',
   'errors.connection': 'Не удаётся подключиться к серверу',
   'errors.invalidData': 'Сервер вернул некорректные данные',
   'errors.invalidId': 'Некорректный ID в ответе',

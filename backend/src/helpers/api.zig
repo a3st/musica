@@ -65,6 +65,7 @@ fn respondFailure(res: *httpz.Response, err: anyerror) !void {
         error.StorageTimeout => 504,
         error.StorageUnavailable => 502,
         error.CatalogUnavailable => 503,
+        error.ImportsDisabled => 503,
         else => return err,
     };
 
@@ -89,6 +90,7 @@ fn respondFailure(res: *httpz.Response, err: anyerror) !void {
         error.StorageTimeout => "storage_timeout",
         error.StorageUnavailable => "storage_unavailable",
         error.CatalogUnavailable => "web_search_unavailable",
+        error.ImportsDisabled => "imports_disabled",
 
         error.InvalidPlaylistId => "invalid_playlist_id",
         error.InvalidPlaylistIds => "invalid_playlist_ids",
@@ -200,4 +202,14 @@ test "client errors retain their contract in every build mode" {
     try context.expectJson(.{ .@"error" = "track_already_uploaded" });
 
     try std.testing.expectError(error.UnexpectedFailure, respondFailure(context.res, error.UnexpectedFailure));
+}
+
+test "disabled imports return an explicit service unavailable response" {
+    var context = httpz.testing.init(.{});
+    defer context.deinit();
+
+    try failure(context.res, error.ImportsDisabled);
+    try context.expectStatus(503);
+    try context.expectJson(.{ .@"error" = "imports_disabled" });
+    try context.expectHeader("Cache-Control", "no-store");
 }

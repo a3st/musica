@@ -2,12 +2,14 @@ const std = @import("std");
 const App = @import("../../app.zig").App;
 const database = @import("../../infrastructure/database.zig");
 const model = @import("model.zig");
-const web_int_service = @import("../web_int/service.zig");
+const imports_service = @import("../imports/service.zig");
 const playlists_repository = @import("../playlists/repository.zig");
 
 /// Проверяет импорт и атомарно создаёт пользовательские плейлисты, привязки общих треков и задачи загрузки.
 /// Дедуплицирует записи внутри импорта; результат в arena не означает завершение скачивания.
 pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Import) !model.Result {
+    try imports_service.requireEnabled(app);
+
     try model.validateImport(input);
 
     const conn = try app.db.acquire();
@@ -31,11 +33,11 @@ pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: mode
             "private",
         );
         for (playlist.tracks) |track| {
-            const track_id = try createTrack(conn, arena, app.storage.bucket, user, track, &tracks);
+            const track_id = try createTrack(app, conn, arena, user, track, &tracks);
             try playlists_repository.addTrack(conn, arena, playlists[index], user, track_id);
         }
     }
-    for (input.library) |track| _ = try createTrack(conn, arena, app.storage.bucket, user, track, &tracks);
+    for (input.library) |track| _ = try createTrack(app, conn, arena, user, track, &tracks);
 
     var unique: std.StringHashMapUnmanaged(void) = .empty;
     defer unique.deinit(arena);
@@ -51,9 +53,9 @@ pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: mode
 /// Переиспользует трек внутри импорта или готовит скачивание и добавляет общий трек в Uploads.
 /// Принимает соединение с транзакцией вызывающего кода; результат хранится в arena.
 fn createTrack(
+    app: *App,
     conn: *database.Connection,
     arena: std.mem.Allocator,
-    bucket: []const u8,
     user: []const u8,
     track: model.Track,
     tracks: *std.StringHashMapUnmanaged([]const u8),
@@ -62,10 +64,10 @@ fn createTrack(
     if (entry.found_existing) return entry.value_ptr.*;
 
     const uploads = try playlists_repository.lockDefault(conn, arena, user);
-    const id = try web_int_service.ensureDownload(
+    const id = try imports_service.enqueueTrack(
+        app,
         conn,
         arena,
-        bucket,
         .{ .title = track.title, .artist = track.artist },
         if (track.spotify_uri) |uri| .{ .provider = "spotify", .external_id = uri[14..] } else null,
     );

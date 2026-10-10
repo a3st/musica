@@ -1,13 +1,13 @@
 const std = @import("std");
 const App = @import("../../app.zig").App;
-const database = @import("../../infrastructure/database.zig");
 const catalog_model = @import("../../infrastructure/catalog/model.zig");
 const model = @import("model.zig");
 const repository = @import("repository.zig");
 const jobs_repository = @import("../../infrastructure/jobs/repository.zig");
 const tracks_model = @import("../tracks/model.zig");
 const playlists_repository = @import("../playlists/repository.zig");
-const users_repository = @import("../users/repository.zig");
+const imports_model = @import("../imports/model.zig");
+const imports_service = @import("../imports/service.zig");
 
 /// Ищет до 25 загруженных сервисных треков по всем словам названия и исполнителя.
 fn searchLocal(app: *App, arena: std.mem.Allocator, query: []const u8) ![]const model.Track {
@@ -204,6 +204,8 @@ fn readSearchCache(app: *App, arena: std.mem.Allocator, key: []const u8) !?[]con
 
 /// Разрешает ID через каталог, ставит загрузку в очередь и при необходимости добавляет в библиотеку.
 pub fn selectTrack(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Selection) ![]const u8 {
+    try imports_service.requireEnabled(app);
+
     try model.validateExternalId(input.external_id);
     const key = try app.catalog.lookupCacheKey(arena, input.provider, input.external_id);
     const track = if (try readSearchCache(app, arena, key)) |body|
@@ -219,10 +221,10 @@ pub fn selectTrack(app: *App, arena: std.mem.Allocator, user: []const u8, input:
 
     // Lock the playlist before the shared track and its jobs.
     const uploads = if (input.add_to_library) try playlists_repository.lockDefault(conn, arena, user) else null;
-    const id = try ensureDownload(
+    const id = try imports_service.enqueueTrack(
+        app,
         conn,
         arena,
-        app.storage.bucket,
         .{ .title = track.title, .artist = track.artist },
         .{ .provider = @tagName(track.provider), .external_id = track.external_id },
     );
@@ -233,81 +235,14 @@ pub fn selectTrack(app: *App, arena: std.mem.Allocator, user: []const u8, input:
     return id;
 }
 
-/// Переиспользует или создаёт общий трек у сервисной учётки и ставит загрузку в очередь.
-/// Принимает соединение с транзакцией вызывающего кода; ID трека выделяется в arena.
-pub fn ensureDownload(
-    conn: *database.Connection,
-    arena: std.mem.Allocator,
-    bucket: []const u8,
-    track: model.CatalogTrack,
-    source: ?model.Source,
-) ![]const u8 {
-    const input = try model.validateTrack(track);
-    const owner = try users_repository.ensureSystem(conn, arena);
-    const id = try repository.getOrCreateCatalogTrack(conn, arena, owner, bucket, input, source);
-
-    _ = try jobs_repository.enqueue(
-        conn,
-        arena,
-        model.download_job_kind,
-        id,
-        model.Payload{ .user_id = owner, .track_id = id, .track = input },
-        0,
-        3,
-    );
-
-    return id;
-}
-
 /// Читает общий трек и состояние загрузки, не добавляя его в библиотеку.
 pub fn readPlayback(app: *App, arena: std.mem.Allocator, id: []const u8) !model.Playback {
     if (!tracks_model.isValidId(id)) return error.InvalidTrackId;
     const conn = try app.db.acquire();
     defer conn.release();
     const track = try repository.readPlaybackTrack(conn, arena, id);
-    const job = try jobs_repository.findByKey(conn, arena, model.download_job_kind, id);
+    const job = try jobs_repository.findByKey(conn, arena, imports_model.download_job_kind, id);
     return .{ .track = track, .download = if (job) |value| value.state else null };
-}
-
-/// Арендует задачу скачивания на 120 секунд и разбирает payload в arena; null, если работы нет.
-/// Некорректный payload помечает failed без повторов.
-pub fn claim(db: *database.Database, arena: std.mem.Allocator) !?model.Task {
-    const conn = try db.acquire();
-    defer conn.release();
-
-    const job = (try jobs_repository.claim(conn, arena, model.download_job_kind, 120)) orelse return null;
-
-    const payload = job.decodePayload(model.Payload, arena) catch |err| {
-        try jobs_repository.fail(conn, job, false, 0);
-
-        return err;
-    };
-
-    return .{ .job = job, .payload = payload };
-}
-
-/// Продлевает действующую аренду скачивания на 120 секунд по часам БД.
-pub fn heartbeat(db: *database.Database, task: model.Task) !void {
-    const conn = try db.acquire();
-    defer conn.release();
-
-    try jobs_repository.heartbeat(conn, task.job, 120);
-}
-
-/// Помечает задачу скачивания завершённой при совпадении попытки и действующей аренде.
-pub fn completeTask(db: *database.Database, task: model.Task) !void {
-    const conn = try db.acquire();
-    defer conn.release();
-
-    try jobs_repository.complete(conn, task.job);
-}
-
-/// Фиксирует ошибку или планирует разрешённый повтор через 30 секунд; потерянную аренду игнорирует.
-pub fn failTask(db: *database.Database, task: model.Task, retryable: bool) !void {
-    const conn = try db.acquire();
-    defer conn.release();
-
-    jobs_repository.fail(conn, task.job, retryable, 30) catch |err| if (err != error.LeaseLost) return err;
 }
 
 test "Parallel catalog search limits concurrency and keeps results after worker arenas are freed" {

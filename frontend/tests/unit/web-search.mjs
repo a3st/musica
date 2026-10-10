@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from '../helpers/typescript.mjs';
 
 const { capabilities } = await import(moduleUrl(new URL('../../src/features/capabilities/model.ts', import.meta.url)));
-assert.deepEqual(capabilities({ web_search: false, spotify_import: true }), { web_search: false, spotify_import: true });
+assert.deepEqual(capabilities({ web_search: true, spotify_import: false }), { web_search: true, spotify_import: false });
 for (const invalid of [null, {}, { web_search: 'false', spotify_import: true }, { web_search: true, spotify_import: 1 }]) {
   assert.throws(() => capabilities(invalid));
 }

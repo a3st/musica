@@ -5,7 +5,7 @@ const repository = @import("repository.zig");
 const cleanup_service = @import("cleanup_service.zig");
 const jobs_repository = @import("../../infrastructure/jobs/repository.zig");
 const streaming_model = @import("../streaming/model.zig");
-const web_int_model = @import("../web_int/model.zig");
+const imports_model = @import("../imports/model.zig");
 const playlists_repository = @import("../playlists/repository.zig");
 
 /// Удаляет личный трек целиком или отвязывает общий трек сервисной учётки от Uploads пользователя.
@@ -35,7 +35,7 @@ pub fn remove(
     const key = try std.ascii.allocLowerString(arena, id);
     const location = try repository.lockForDeletion(conn, arena, user, key);
 
-    if (try jobs_repository.lockByKey(conn, arena, web_int_model.download_job_kind, key)) |job| {
+    if (try jobs_repository.lockByKey(conn, arena, imports_model.download_job_kind, key)) |job| {
         if (try jobs_repository.isActive(conn, arena, job.id)) return error.UploadInProgress;
     }
 
@@ -67,7 +67,7 @@ pub fn remove(
     }
 
     try jobs_repository.removeByKey(conn, streaming_model.preparation_job_kind, key);
-    try jobs_repository.removeByKey(conn, web_int_model.download_job_kind, key);
+    try jobs_repository.removeByKey(conn, imports_model.download_job_kind, key);
     try jobs_repository.removeByKey(conn, model.upload_job_kind, key);
     try jobs_repository.removeByKey(conn, model.metadata_job_kind, key);
 

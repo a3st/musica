@@ -82,7 +82,7 @@ def check_spotify_import(api_request, execute_sql, env, executable, backend):
         HTTP_PORT=str(available_port()),
         YTDLP_PATH=str(backend / 'zig-out' / 'bin' / fixture_name),
         DOWNLOAD_FIXTURE_CONTROL=str(control),
-        SPOTIFY_TMP_DIR=str(backend / '.zig-cache' / 'spotify-scratch'),
+        IMPORTS_TMP_DIR=str(backend / '.zig-cache' / 'spotify-scratch'),
     )
     # The secondary HTTP port is disposable; workers share only PostgreSQL and S3.
     logfile = backend / '.zig-cache' / 'spotify-integration.log'

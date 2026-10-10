@@ -4,7 +4,7 @@ const model = @import("model.zig");
 const repository = @import("repository.zig");
 const operations = @import("operations.zig");
 const playlists_repository = @import("../playlists/repository.zig");
-const web_int_model = @import("../web_int/model.zig");
+const imports_model = @import("../imports/model.zig");
 const cleanup_service = @import("cleanup_service.zig");
 const jobs_repository = @import("../../infrastructure/jobs/repository.zig");
 const Job = @import("../../infrastructure/jobs/model.zig").Job;
@@ -119,7 +119,7 @@ fn uploadImpl(
         const original = try repository.lockForUpload(conn, arena, canonical_id, user);
         if (guard) |job| {
             try jobs_repository.heartbeat(conn, job, 120);
-        } else if (try jobs_repository.findByKey(conn, arena, web_int_model.download_job_kind, canonical_id)) |job| {
+        } else if (try jobs_repository.findByKey(conn, arena, imports_model.download_job_kind, canonical_id)) |job| {
             if (try jobs_repository.isActive(conn, arena, job.id)) return error.UploadInProgress;
         }
         const value: model.UploadLocation = .{

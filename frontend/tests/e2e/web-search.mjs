@@ -44,6 +44,7 @@ let downloadReads = 0;
 let preparationReads = 0;
 let failLibrary = false;
 let integrationsEnabled = true;
+let spotifyEnabled = true;
 let releaseOld;
 let oldArrived;
 const errors = [];
@@ -63,7 +64,7 @@ await page.route('**/api/**', async route => {
   const json = (data, status = 200) => route.fulfill({
     status, contentType: 'application/json', body: JSON.stringify(data),
   });
-  if (url.pathname === '/api/capabilities') return json({ web_search: integrationsEnabled, spotify_import: integrationsEnabled });
+  if (url.pathname === '/api/capabilities') return json({ web_search: integrationsEnabled, spotify_import: integrationsEnabled && spotifyEnabled });
   if (url.pathname === '/api/users/me') return json(user);
   if (url.pathname === '/api/playlists') return json([{ ...playlist, track_count: tracks.length }, { ...playlist, id: id(4), title: 'Other playlist', is_default: false, track_count: 1 }]);
   if (url.pathname === `/api/playlists/${id(4)}`) {
@@ -305,6 +306,19 @@ try {
   assert.equal(await page.locator('.search-result-text strong').textContent(), 'Local favorite', 'typing searches automatically after the debounce');
   await page.locator('#profile-toggle').click();
   await page.locator('#search-results').waitFor({ state: 'detached' });
+  await page.keyboard.press('Escape');
+  spotifyEnabled = false;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator('.playlist-hero').waitFor();
+  await page.locator('#search').fill('catalog only');
+  await page.locator('#search').press('Enter');
+  await page.locator('.search-result[data-source=web]').waitFor();
+  assert.equal(await page.locator('.search-result[data-source=web] .search-result-art').isDisabled(), true, 'Web search remains available but imports are disabled without Spotify');
+  assert.equal(await page.locator('.search-result[data-source=web] .search-result-add').isDisabled(), true);
+  await page.locator('.search-result[data-source=web]').hover();
+  await page.locator('.search-result[data-source=web] .search-result-more').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Add to Uploads', exact: true }).isDisabled(), true);
   await page.keyboard.press('Escape');
   integrationsEnabled = false;
   const beforeDisabled = searches.length;
