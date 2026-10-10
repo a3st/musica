@@ -26,7 +26,7 @@ const user = { id: id(1), username: 'music_lover', default_playlist_id: id(2) };
 const metadata = (n, title, isDefault = false) => ({ id: id(n), owner_id: user.id, title, description: '',
   tags: ['ambient'], visibility: 'private', is_default: isDefault, image_key: null, role: 'owner', track_count: 0 });
 const tracks = [
-  { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed', artwork_key: 'tracks/first/artwork/initial.jpg' },
+  { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed', duration_seconds: 183, artwork_key: 'tracks/first/artwork/initial.jpg' },
   { id: id(11), owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed', artwork_key: 'missing.jpg' },
   { id: id(12), owner_id: user.id, title: '<img src=x onerror=alert(1)>', artist: 'Test', status: 'pending' },
 ];
@@ -112,7 +112,8 @@ await page.route('**/api/**', async (route) => {
     if (expireLibrary) return json({ error: 'unauthorized' }, 401);
     const p = playlists.find((p) => p.id === match[1]);
     if (!authenticated && p.visibility !== 'public') return json({ error: 'unauthorized' }, 401);
-    return json({ ...p, tracks: members.get(match[1]) });
+    const items = members.get(match[1]);
+    return json({ ...p, tracks: items, duration_seconds: items.length ? items.reduce((total, track) => total + (track.duration_seconds ?? 0), 0) : 0, duration_complete: items.every(track => track.duration_seconds != null) });
   }
   match = path.match(/^\/api\/playlists\/([^/]+)\/tracks\/([^/]+)$/);
   if (match) {
@@ -175,7 +176,8 @@ try {
   assert.equal(await page.locator('.collection-toolbar button').count(), 2);
   assert.equal(await page.locator('.track-favorite').count(), 0);
   assert.equal(await page.locator('.collection-toolbar .round-button[disabled]').count(), 0);
-  assert.equal(await page.locator('.track-row .track-length').first().textContent(), '—:—');
+  assert.equal(await page.locator('.track-row .track-length').first().textContent(), '3:03');
+  assert.match(await page.locator('.hero-facts').textContent(), /не менее 3 мин 3 с/);
   assert.equal(await page.locator('.sidebar').evaluate(el => getComputedStyle(el).borderTopLeftRadius), '22px');
   await page.locator('#volume').evaluate(input => {
     input.value = '37';
@@ -247,7 +249,7 @@ try {
   await page.locator('#volume').fill('35');
   assert.equal(await page.locator('#volume').evaluate(el => el.style.getPropertyValue('--progress')), '35%');
   assert.match(await page.locator('#volume').evaluate(el => getComputedStyle(el).backgroundImage), /35%/);
-  assert.match(await page.locator('.hero-facts').textContent(), /3 треков, — ч/);
+  assert.match(await page.locator('.hero-facts').textContent(), /3 треков · не менее 3 мин 3 с/);
   assert.equal(await page.evaluate(() => {
     const top = document.querySelector('.topbar').getBoundingClientRect();
     const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
@@ -277,6 +279,9 @@ try {
   await page.keyboard.press('Home');
   await page.waitForFunction(() => document.querySelector('#collection').scrollTop === 0);
   const railBox = await page.locator('.collection-scrollbar').boundingBox(); const thumbBox = await thumb.boundingBox();
+  const collectionBox = await page.locator('#collection').boundingBox();
+  assert.equal(railBox.width, 8, 'playlist scrollbar is thicker');
+  assert.ok(Math.abs(railBox.x + railBox.width - collectionBox.x - collectionBox.width) < 1, 'playlist scrollbar is flush with the panel edge');
   await page.mouse.move(thumbBox.x + 3, thumbBox.y + thumbBox.height / 2); await page.mouse.down(); await page.mouse.move(railBox.x + 3, railBox.y + railBox.height); await page.mouse.up();
   await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
   await thumb.focus(); await page.keyboard.press('Home');
@@ -291,7 +296,7 @@ try {
   assert.equal(await page.locator('html').getAttribute('lang'), 'en-US');
   assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Search for songs or artists…');
   assert.equal(await page.locator('.sidebar .library-heading>span').textContent(), 'PLAYLISTS');
-  assert.match(await page.locator('.hero-facts').textContent(), /3 tracks, — hours/);
+  assert.match(await page.locator('.hero-facts').textContent(), /3 tracks · at least 3 min 3 sec/);
   assert.equal(await page.locator('.sidebar .playlist-link strong').nth(1).textContent(), 'Тихие вечера', 'user metadata stays untranslated');
   await page.keyboard.press('Escape');
   await page.screenshot({ path: '../backend/.zig-cache/ui-english.png' });
@@ -594,5 +599,5 @@ try {
   await page.locator('#auth-dialog[open]').waitFor();
   assert.equal(authenticated, false, 'sign out is available in the profile menu');
   assert.deepEqual(errors, []);
-  console.log('PASS: rounded responsive panels, context menus, playlist editing/deletion/artwork/retry, queue playback/removal, mute, duration placeholders, localization, HLS, uploads, Spotify and auth.');
+  console.log('PASS: rounded responsive panels, context menus, playlist editing/deletion/artwork/retry, queue playback/removal, mute, track and playlist durations, localization, HLS, uploads, Spotify and auth.');
 } finally { await browser.close(); rmSync(temporary, { recursive: true, force: true }); }

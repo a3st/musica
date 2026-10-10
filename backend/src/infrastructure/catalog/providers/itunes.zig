@@ -1,17 +1,26 @@
 const std = @import("std");
-const web_int_model = @import("../features/web_int/model.zig");
+const catalog_model = @import("../model.zig");
 
 /// Общий HTTP-клиент каталога; после первого запроса не копируйте экземпляр.
 pub const ITunesClient = struct {
     client: std.http.Client,
+    country: []const u8,
+    limit: u32,
 
-    /// Создаёт клиент с пулом соединений; освобождается после остановки HTTP-сервера.
-    pub fn init(io: std.Io, allocator: std.mem.Allocator) ITunesClient {
+    /// Создаёт клиент с параметрами поиска; country должен жить до deinit.
+    pub fn init(
+        io: std.Io,
+        allocator: std.mem.Allocator,
+        country: []const u8,
+        limit: u32,
+    ) ITunesClient {
         return .{
             .client = .{
                 .io = io,
                 .allocator = allocator,
             },
+            .country = country,
+            .limit = limit,
         };
     }
 
@@ -21,17 +30,17 @@ pub const ITunesClient = struct {
         self.* = undefined;
     }
 
-    /// Ищет до 25 песен в US-каталоге iTunes; запрос кодируется как URL-компонент.
+    /// Ищет песни с заданными страной и лимитом; запрос кодируется как URL-компонент.
     pub fn search(
         self: *ITunesClient,
         arena: std.mem.Allocator,
-        term: []const u8,
-    ) ![]const web_int_model.SearchTrack {
-        const encoded = try encodeQuery(arena, term);
+        query: []const u8,
+    ) ![]const catalog_model.Track {
+        const encoded = try encodeQuery(arena, query);
         const url = try std.fmt.allocPrint(
             arena,
-            "https://itunes.apple.com/search?term={s}&country=US&media=music&entity=song&limit=25",
-            .{encoded},
+            "https://itunes.apple.com/search?term={s}&country={s}&media=music&entity=song&limit={d}",
+            .{ encoded, self.country, self.limit },
         );
 
         return parseTracks(arena, try self.fetch(arena, url));
@@ -42,13 +51,13 @@ pub const ITunesClient = struct {
         self: *ITunesClient,
         arena: std.mem.Allocator,
         id: []const u8,
-    ) !web_int_model.SearchTrack {
-        try web_int_model.validateExternalId(id);
+    ) !catalog_model.Track {
+        try catalog_model.validateExternalId(id);
 
         const url = try std.fmt.allocPrint(
             arena,
-            "https://itunes.apple.com/lookup?id={s}&country=US&entity=song",
-            .{id},
+            "https://itunes.apple.com/lookup?id={s}&country={s}&entity=song",
+            .{ id, self.country },
         );
         const tracks = try parseTracks(arena, try self.fetch(arena, url));
         const numeric_id = try std.fmt.parseInt(u64, id, 10);
@@ -136,14 +145,13 @@ fn encodeQuery(arena: std.mem.Allocator, value: []const u8) ![]const u8 {
 }
 
 /// Разбирает ответ провайдера и исключает записи, не являющиеся песнями.
-fn parseTracks(arena: std.mem.Allocator, body: []const u8) ![]const web_int_model.SearchTrack {
+fn parseTracks(arena: std.mem.Allocator, body: []const u8) ![]const catalog_model.Track {
     const Song = struct {
         kind: ?[]const u8 = null,
         trackId: ?u64 = null,
         trackName: ?[]const u8 = null,
         artistName: ?[]const u8 = null,
         collectionName: ?[]const u8 = null,
-        trackTimeMillis: ?u32 = null,
         artworkUrl100: ?[]const u8 = null,
         trackViewUrl: ?[]const u8 = null,
     };
@@ -153,7 +161,7 @@ fn parseTracks(arena: std.mem.Allocator, body: []const u8) ![]const web_int_mode
         .allocate = .alloc_always,
     }) catch return error.CatalogUnavailable;
 
-    var tracks: std.ArrayList(web_int_model.SearchTrack) = .empty;
+    var tracks: std.ArrayList(catalog_model.Track) = .empty;
 
     for (parsed.value.results) |song| {
         if (!std.mem.eql(u8, song.kind orelse "", "song")) continue;
@@ -168,9 +176,8 @@ fn parseTracks(arena: std.mem.Allocator, body: []const u8) ![]const web_int_mode
             .title = title,
             .artist = artist,
             .album = song.collectionName,
-            .duration_seconds = if (song.trackTimeMillis) |milliseconds| milliseconds / 1000 else null,
             .artwork_url = secureUrl(song.artworkUrl100),
-            .store_url = secureUrl(song.trackViewUrl),
+            .source_url = secureUrl(song.trackViewUrl),
         });
     }
 
@@ -202,6 +209,5 @@ test "iTunes results preserve recording names and reject non-song entries" {
 
     try std.testing.expectEqual(@as(usize, 1), tracks.len);
     try std.testing.expectEqualStrings("Song (Live Remix)", tracks[0].title);
-    try std.testing.expectEqual(@as(?u32, 123), tracks[0].duration_seconds);
     try std.testing.expect(tracks[0].artwork_url == null);
 }

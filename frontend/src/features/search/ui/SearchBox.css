@@ -12,12 +12,16 @@
   max-height: min(520px, calc(100dvh - var(--topbar-height) - var(--player-height) - 40px));
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  padding: 10px;
+  scrollbar-width: none;
+  padding: 10px 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 16px 40px #0005;
+}
+
+.search-dropdown::-webkit-scrollbar {
+  display: none;
 }
 
 .search-dropdown h2 {
@@ -46,6 +50,9 @@
 }
 
 .search-result-art {
+  position: relative;
+  padding: 0;
+  border: 0;
   display: grid;
   place-items: center;
   width: 44px;
@@ -55,6 +62,41 @@
   overflow: hidden;
   color: var(--muted);
   background: var(--input);
+}
+
+.search-art-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0008;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.search-result-art:hover .search-art-play,
+.search-result-art:focus-visible .search-art-play,
+.search-result-art[aria-busy='true'] .search-art-play {
+  opacity: 1;
+}
+
+.search-result-more {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.search-result:hover .search-result-more,
+.search-result:focus-within .search-result-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.search-result-more,
+.search-result-add {
+  width: 28px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
 .search-result-art img {
@@ -103,11 +145,6 @@
 }
 
 .search-result-text > span,
-.search-result-duration {
-  font-size: 12px;
-  color: var(--muted);
-}
-
 .search-result-add {
   font-size: 11px;
   color: var(--accent);
@@ -137,7 +174,14 @@
     right: var(--panel-gap);
   }
 
-  .search-result-add {
-    display: none;
+  .search-result {
+    gap: 8px;
+  }
+}
+
+@media (hover: none) {
+  .search-result-more {
+    opacity: 1;
+    pointer-events: auto;
   }
 }

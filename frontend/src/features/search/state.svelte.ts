@@ -2,6 +2,7 @@ import { playlistsApi } from '../playlists/api';
 import type { Playlist, PlaylistSummary } from '../playlists/model';
 import type { Track } from '../tracks/model';
 import type { SearchTrack } from '../web-search/model';
+import { searchTrackKey } from '../web-search/model';
 import { WebSearchState } from '../web-search/state.svelte';
 import { errorMessage } from '../../shared/api/errors';
 
@@ -107,7 +108,7 @@ export class SearchState {
 
   remember(result: RecentResult): void {
     const key = (item: RecentResult) =>
-      item.kind === 'local' ? `local:${item.result.track.id}` : `web:${item.track.external_id}`;
+      item.kind === 'local' ? `local:${item.result.track.id}` : `web:${searchTrackKey(item.track)}`;
     this.recent = [result, ...this.recent.filter((item) => key(item) !== key(result))].slice(0, 8);
   }
 

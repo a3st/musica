@@ -1,6 +1,7 @@
 import { webSearchApi } from './api';
 import { errorMessage } from '../../shared/api/errors';
 import type { SearchTrack } from './model';
+import { searchTrackKey } from './model';
 
 export class WebSearchState {
   query = $state('');
@@ -9,6 +10,9 @@ export class WebSearchState {
   searched = $state(false);
   error = $state('');
   additions = $state<Record<string, 'adding' | 'added'>>({});
+  playingTrackKey = $state<string | null>(null);
+  private trackIds = new Map<string, string>();
+  private pendingAdditions = new Map<string, Promise<string>>();
   private searchController?: AbortController;
   private additionsController = new AbortController();
   private version = 0;
@@ -44,18 +48,38 @@ export class WebSearchState {
     }
   }
 
-  async add(track: SearchTrack): Promise<void> {
-    if (this.additions[track.external_id]) return;
+  add(track: SearchTrack, signal?: AbortSignal): Promise<string> {
+    const key = searchTrackKey(track);
+    const id = this.trackIds.get(key);
+    if (id) return Promise.resolve(id);
+    const pending = this.pendingAdditions.get(key);
+    if (pending) return pending;
+
+    const promise = this.addTrack(track, signal);
+    this.pendingAdditions.set(key, promise);
+    void promise
+      .finally(() => {
+        if (this.pendingAdditions.get(key) === promise) this.pendingAdditions.delete(key);
+      })
+      .catch(() => {});
+    return promise;
+  }
+
+  private async addTrack(track: SearchTrack, signal?: AbortSignal): Promise<string> {
+    const key = searchTrackKey(track);
     const controller = this.additionsController;
-    this.additions[track.external_id] = 'adding';
+    const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    this.additions[key] = 'adding';
     try {
-      await webSearchApi.add(track.external_id, controller.signal);
-      if (controller.signal.aborted) return;
-      this.additions[track.external_id] = 'added';
+      const id = await webSearchApi.add(track, combined);
+      combined.throwIfAborted();
+      this.trackIds.set(key, id);
+      this.additions[key] = 'added';
       await this.refresh();
+      combined.throwIfAborted();
+      return id;
     } catch (error) {
-      if (controller.signal.aborted) return;
-      if (this.additions[track.external_id] !== 'added') delete this.additions[track.external_id];
+      if (!controller.signal.aborted && this.additions[key] !== 'added') delete this.additions[key];
       throw error;
     }
   }
@@ -76,5 +100,8 @@ export class WebSearchState {
     this.searched = false;
     this.error = '';
     this.additions = {};
+    this.trackIds.clear();
+    this.pendingAdditions.clear();
+    this.playingTrackKey = null;
   }
 }

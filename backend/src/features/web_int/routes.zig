@@ -14,9 +14,9 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 /// Возвращает метаданные каталога; поиск не скачивает аудио.
 fn search(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     _ = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    const query = req.query() catch return api.failure(res, error.InvalidInput);
-    const term = query.get("q") orelse return api.failure(res, error.InvalidInput);
-    const tracks = service.search(app, res.arena, term) catch |err| return api.failure(res, err);
+    const params = req.query() catch return api.failure(res, error.InvalidInput);
+    const query = params.get("q") orelse return api.failure(res, error.InvalidInput);
+    const tracks = service.search(app, res.arena, query) catch |err| return api.failure(res, err);
 
     res.header("Cache-Control", "no-store");
     try res.json(.{ .tracks = tracks }, .{});

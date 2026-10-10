@@ -16,6 +16,12 @@ for (const key of Object.keys(russian)) {
 assert.equal(translate('uploads.title', 'ru-RU'), 'Загрузить треки');
 assert.equal(translate('uploads.title', 'en-US'), 'Upload Tracks');
 assert.equal(translate('playlists.trackCount', 'ru-RU', { count: 0 }), '0 треков');
+const { playlistDuration } = await import(moduleUrl(new URL('../../src/features/playlists/duration.ts', import.meta.url)));
+const language = locale => ({ t: createTranslator(() => locale) });
+assert.equal(playlistDuration({ duration_seconds: 0, duration_complete: true }, language('en-US')), '0 sec');
+assert.equal(playlistDuration({ duration_seconds: 3725, duration_complete: true }, language('ru-RU')), '1 ч 2 мин');
+assert.equal(playlistDuration({ duration_seconds: 125, duration_complete: false }, language('en-US')), 'at least 2 min 5 sec');
+assert.equal(playlistDuration({ duration_seconds: null, duration_complete: false }, language('ru-RU')), 'длительность неизвестна');
 assert.equal(translate('player.elapsedOfTotal', 'en-US', { elapsed: '1:05', total: '3:42' }), '1:05 of 3:42');
 const title = '<img src=x onerror=alert(1)> {count} $&';
 assert.equal(translate('tracks.play', 'en-US', { title }), `Play ${title}`, 'metadata is inserted literally without recursive translation');

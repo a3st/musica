@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
   import TrackArtwork from './TrackArtwork.svelte';
+  import { time } from '../../../shared/utils/time';
   import type { Track } from '../model';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   let {
@@ -71,7 +72,9 @@
       </div>
       <span class="track-artist">{track.artist}</span><span
         class="track-length"
-        aria-label={language.t('tracks.durationUnknown')}>—:—</span
+        aria-label={track.duration_seconds == null
+          ? language.t('tracks.durationUnknown')
+          : undefined}>{track.duration_seconds == null ? '—:—' : time(track.duration_seconds)}</span
       >
       <span class="track-status" class:ready-status={track.status === 'streamed'}
         >{language.t(

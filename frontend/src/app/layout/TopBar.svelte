@@ -33,8 +33,12 @@
     state={app.search}
     language={app.language}
     play={(result) => app.run(app.playSearchResult(result))}
+    playWeb={(track) => app.run(app.playWebTrack(track))}
+    menu={(track, origin) => app.showWebTrackMenu(track, origin)}
+    ownsContextMenu={!!app.menu.origin?.hasAttribute('data-search-menu')}
+    waitingTrackKey={app.player.value.loading ? app.search.web.playingTrackKey : null}
     add={(track) => {
-      if (app.requireLogin()) app.run(app.search.web.add(track));
+      app.run(app.addWebTrack(track));
     }}
   />
   <div class="topbar-actions">

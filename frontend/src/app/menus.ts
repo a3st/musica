@@ -2,6 +2,7 @@ import type { Application } from './state.svelte';
 import type { MenuItem } from '../shared/ui/menu.svelte';
 import type { PlaylistSummary } from '../features/playlists/model';
 import type { Track } from '../features/tracks/model';
+import type { SearchTrack } from '../features/web-search/model';
 import { playlistsApi } from '../features/playlists/api';
 import { tracksApi } from '../features/tracks/api';
 import { copyText } from '../shared/utils/clipboard';
@@ -75,6 +76,44 @@ async function copyShareLink(app: Application, playlist: PlaylistSummary): Promi
   await copyText(url.href);
   app.notify(app.language.t('share.copied'));
 }
+export function webTrackMenu(app: Application, track: SearchTrack): MenuItem[] {
+  const { t } = app.language;
+  const targets = app.library.items.filter((playlist) => playlist.role !== 'viewer');
+  return [
+    {
+      label: t('player.play'),
+      icon: 'play',
+      group: 'playback',
+      action: () => app.run(app.playWebTrack(track)),
+    },
+    {
+      label: t('tracks.addToPlaylist'),
+      icon: 'plus',
+      group: 'organize',
+      disabled: !targets.length,
+      children: targets.map((playlist) => ({
+        label: playlist.title,
+        icon: 'library',
+        action: () => app.run(app.addWebTrack(track, playlist.id)),
+      })),
+    },
+    {
+      label: t('web.copySourceLink'),
+      icon: 'link',
+      group: 'sharing',
+      disabled: !track.source_url,
+      action: () =>
+        app.run(
+          (async () => {
+            if (!track.source_url) return;
+            await copyText(track.source_url);
+            app.notify(t('share.copied'));
+          })(),
+        ),
+    },
+  ];
+}
+
 export function trackMenu(app: Application, track: Track): MenuItem[] {
   const playlist = app.library.selected;
   if (!playlist) return [];

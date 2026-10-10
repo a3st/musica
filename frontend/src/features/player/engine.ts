@@ -14,6 +14,7 @@ export class PlayerEngine {
   private generation = 0;
   private playbackRequested = false;
   private playAttempt: Promise<void> | null = null;
+  private deferredController?: AbortController;
   private readonly listeners = new AbortController();
   constructor(
     private readonly emit: () => void,
@@ -135,7 +136,28 @@ export class PlayerEngine {
       }
     }
   }
-  async load(track: Track, queue: Track[]): Promise<void> {
+  /** Ожидает загрузку каталожного трека, отменяя ожидание при выборе другого. */
+  async loadDeferred(resolveTrack: (signal: AbortSignal) => Promise<Track>): Promise<void> {
+    this.stop();
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.deferredController = controller;
+    this.loading = true;
+    this.emit();
+    try {
+      const track = await resolveTrack(controller.signal);
+      if (generation !== this.generation || controller.signal.aborted) return;
+      await this.load(track, [track], true);
+    } catch (error) {
+      if (generation === this.generation && !controller.signal.aborted) {
+        this.loading = false;
+        this.notify(errorMessage(error));
+        this.emit();
+      }
+    }
+  }
+
+  async load(track: Track, queue: Track[], waitForAutomaticPreparation = false): Promise<void> {
     this.stop();
     const generation = this.generation;
     const token = this.shareToken(track.id);
@@ -152,7 +174,11 @@ export class PlayerEngine {
           if (generation !== this.generation) return;
           const state = await api.preparation(track.id, token);
           if (state.status === 'streamed') break;
-          if (state.preparation === null && track.owner_id !== this.userId())
+          if (
+            state.preparation === null &&
+            track.owner_id !== this.userId() &&
+            !waitForAutomaticPreparation
+          )
             throw new Error(t('player.ownerPreparationRequired'));
           if (state.preparation === 'failed') throw new Error(t('player.preparationFailed'));
           if (attempt >= 900) throw new Error(t('player.preparationTimeout'));
@@ -297,6 +323,8 @@ export class PlayerEngine {
   }
   stop(): void {
     this.generation++;
+    this.deferredController?.abort();
+    this.deferredController = undefined;
     this.playbackRequested = false;
     this.playAttempt = null;
     this.audio.pause();

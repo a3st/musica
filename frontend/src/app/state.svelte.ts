@@ -11,9 +11,13 @@ import { ThemeState } from '../shared/theme/state.svelte';
 import { MenuState } from '../shared/ui/menu.svelte';
 import { ApiError, errorMessage } from '../shared/api/errors';
 import { readNavigation, selectNavigation } from './navigation';
-import { playlistMenu, trackMenu } from './menus';
+import { playlistMenu, trackMenu, webTrackMenu } from './menus';
 import type { PlaylistSummary } from '../features/playlists/model';
 import type { Track } from '../features/tracks/model';
+import type { SearchTrack } from '../features/web-search/model';
+import { searchTrackKey } from '../features/web-search/model';
+import { waitForDownloadedTrack } from '../features/web-search/playback';
+import { playlistsApi } from '../features/playlists/api';
 
 export interface Confirmation {
   title: string;
@@ -191,6 +195,35 @@ export class Application {
     }
     this.player.cover = this.library.selected;
     this.run(this.player.engine.load(track, this.library.visibleTracks));
+  }
+
+  async addWebTrack(track: SearchTrack, playlistId?: string): Promise<void> {
+    if (!this.requireLogin()) return;
+    this.search.remember({ kind: 'web', track });
+    const version = this.sessionVersion;
+    const id = await this.search.web.add(track);
+    if (version !== this.sessionVersion || this.disposed) return;
+    if (playlistId && playlistId !== this.auth.user?.default_playlist_id) {
+      await playlistsApi.attachTrack(playlistId, id);
+      await this.refresh();
+      this.notify(this.language.t('tracks.addedToPlaylist'));
+    }
+  }
+
+  async playWebTrack(track: SearchTrack): Promise<void> {
+    const user = this.auth.user;
+    if (!this.requireLogin() || !user) return;
+    this.search.remember({ kind: 'web', track });
+    this.search.web.playingTrackKey = searchTrackKey(track);
+    await this.player.engine.loadDeferred(async (signal) => {
+      const id = await this.search.web.add(track, signal);
+      signal.throwIfAborted();
+      return waitForDownloadedTrack(id, user.default_playlist_id, signal);
+    });
+  }
+
+  showWebTrackMenu(track: SearchTrack, origin: HTMLElement): void {
+    this.menu.toggle(webTrackMenu(this, track), origin);
   }
   shufflePlaylist(): void {
     if (!this.player.value.shuffle) this.player.engine.toggleShuffle();

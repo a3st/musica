@@ -1,6 +1,6 @@
 .collection-scrollbar {
   position: fixed;
-  width: 6px;
+  width: 8px;
   z-index: 12;
   touch-action: none;
   opacity: 0.35;
@@ -15,6 +15,7 @@
   cursor: grab;
 }
 main:hover ~ .collection-scrollbar,
+.search-container:hover .collection-scrollbar,
 .collection-scrollbar:hover,
 .collection-scrollbar:focus-within,
 .collection-scrollbar.dragging {
@@ -26,6 +27,6 @@ main:hover ~ .collection-scrollbar,
 }
 @media (max-width: 760px) {
   .collection-scrollbar {
-    width: 4px;
+    width: 6px;
   }
 }

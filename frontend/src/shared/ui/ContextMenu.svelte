@@ -97,7 +97,7 @@
       return;
     if (
       event.button === 0 &&
-      menu.origin?.matches('[data-track-menu]') &&
+      menu.origin?.matches('[data-track-menu], [data-search-menu]') &&
       menu.origin.contains(event.target)
     )
       return;

@@ -6,7 +6,7 @@ const App = @import("app.zig").App;
 
 const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
-const ITunesClient = @import("infrastructure/itunes.zig").ITunesClient;
+const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
 
 const health_routes = @import("features/health/routes.zig");
 const tracks_routes = @import("features/tracks/routes.zig");
@@ -29,9 +29,12 @@ pub fn main(init: std.process.Init) !void {
     const config = try Config.load(init.environ_map);
 
     var app: App = .{
+        .allocator = init.gpa,
+        .io = init.io,
+
         .db = try Database.init(init.io, init.gpa, config.database),
         .storage = S3.init(init.io, init.gpa, config.s3),
-        .catalog = ITunesClient.init(init.io, init.gpa),
+        .catalog = Catalog.init(init.io, init.gpa),
 
         .max_upload_bytes = config.max_upload_bytes,
         .ffmpeg_path = config.ffmpeg_path,
@@ -119,9 +122,10 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("infrastructure/catalog/catalog.zig");
     _ = @import("features/tracks/metadata_worker.zig");
     _ = @import("features/web_int/routes.zig");
-    _ = @import("infrastructure/itunes.zig");
+    _ = @import("infrastructure/catalog/providers/itunes.zig");
     _ = @import("features/spotify_int/model.zig");
     _ = @import("features/spotify_int/routes.zig");
     _ = @import("features/web_int/worker.zig");

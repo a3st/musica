@@ -9,11 +9,11 @@
   function update(): void {
     if (!target || !rail || !thumb) return;
     const rect = target.getBoundingClientRect();
-    const height = Math.max(0, rect.height - 24);
+    const height = Math.max(0, rect.height);
     const maximum = target.scrollHeight - target.clientHeight;
     rail.hidden = maximum <= 1 || height < 40;
-    rail.style.top = `${rect.top + 12}px`;
-    rail.style.left = `${rect.right - 11}px`;
+    rail.style.top = `${rect.top}px`;
+    rail.style.left = `${rect.right - rail.offsetWidth}px`;
     rail.style.height = `${height}px`;
     const length = Math.min(80, Math.max(32, (height * target.clientHeight) / target.scrollHeight));
     travel = height - length;
@@ -100,7 +100,7 @@
     class="collection-scrollbar-thumb"
     role="scrollbar"
     tabindex="0"
-    aria-controls="collection"
+    aria-controls={target?.id}
     aria-orientation="vertical"
     aria-valuemin="0"
     aria-valuemax="100"

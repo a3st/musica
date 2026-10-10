@@ -1,5 +1,6 @@
 <script lang="ts">
   import CoverArt from './CoverArt.svelte';
+  import { playlistDuration } from '../duration';
   import type { Playlist } from '../model';
   import type { User } from '../../auth/model';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
@@ -40,7 +41,12 @@
     <div class="hero-facts">
       <span class="owner-avatar">{owner[0].toLocaleUpperCase()}</span><strong>{owner}</strong><span
         class="fact-dot">·</span
-      ><span>{language.t('playlists.summary', { count: playlist.tracks.length })}</span>
+      ><span
+        >{language.t('playlists.summary', {
+          count: playlist.tracks.length,
+          duration: playlistDuration(playlist, language),
+        })}</span
+      >
     </div>
   </div>
 </section>

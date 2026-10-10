@@ -932,19 +932,27 @@ def run_api_checks(optimize="Debug", backend_image=None):
 
         # Catalog fixtures are seeded only in the disposable database; no Apple request is needed.
         web_song = {
-            'external_id': '123456', 'title': 'Web fixture (Live)', 'artist': 'Web artist',
-            'album': 'Web album', 'duration_seconds': 123, 'artwork_url': None, 'store_url': None,
+            'provider': 'itunes', 'external_id': '123456', 'title': 'Web fixture (Live)', 'artist': 'Web artist',
+            'album': 'Web album', 'artwork_url': None, 'source_url': None,
         }
-        for key, value in [('itunes:search:US:Web fixture', [web_song]), ('itunes:lookup:US:123456', web_song)]:
+        for key, value in [
+            ('catalog:v2:search:itunes:US:25:Web fixture', [web_song]),
+            ('catalog:v2:search:itunes:US:25:Empty fixture', []),
+            ('catalog:v2:lookup:itunes:US:123456', web_song),
+        ]:
             body = json.dumps(value)
             execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('{key}', '{body}', clock_timestamp() + interval '10 minutes')")
         api_request('GET', '/api/web/search?q=Web%20fixture', expected=401)
         api_request('GET', '/api/web/search?q=x', token=a, expected=400)
         assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['tracks'] == [web_song]
-        api_request('POST', '/api/web/tracks', {'external_id': '123456'}, expected=401)
-        api_request('POST', '/api/web/tracks', {'external_id': '123&other=1'}, token=a, expected=400)
-        first_web = api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=a, expected=202)['id']
-        second_web = api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=b, expected=202)['id']
+        assert api_request('GET', '/api/web/search?q=%20Web%20fixture%20', token=a)['tracks'] == [web_song]
+        assert api_request('GET', '/api/web/search?q=Empty%20fixture', token=a)['tracks'] == []
+        api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, expected=401)
+        api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123&other=1'}, token=a, expected=400)
+        api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=a, expected=400)
+        api_request('POST', '/api/web/tracks', {'provider': 'deezer', 'external_id': '123456'}, token=a, expected=400)
+        first_web = api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, token=a, expected=202)['id']
+        second_web = api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, token=b, expected=202)['id']
         assert first_web == second_web
         assert execute_sql(f"SELECT count(*) FROM musica.track_sources WHERE provider='itunes' AND external_id='123456' AND track_id='{first_web}'") == '1'
         assert execute_sql(f"SELECT count(*) FROM public.jobs WHERE kind='download_track' AND dedupe_key='{first_web}'") == '1'

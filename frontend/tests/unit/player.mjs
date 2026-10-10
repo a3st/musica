@@ -99,4 +99,31 @@ interrupted.toggle();
 interrupted.audio.dispatchEvent(new Event('canplay'));
 assert.equal(interrupted.snapshot().paused, true, 'canplay must not resume a track paused by the user');
 interrupted.dispose();
+const deferredNotices = [];
+const deferred = new PlayerEngine(() => {}, message => deferredNotices.push(message), () => id(1), () => null);
+let releaseDownload;
+let downloadSignal;
+const deferredLoad = deferred.loadDeferred(signal => {
+  downloadSignal = signal;
+  return new Promise(resolve => { releaseDownload = resolve; });
+});
+assert.equal(deferred.loading, true, 'waiting for a download is visible immediately');
+await deferred.load(second, [second]);
+assert.equal(downloadSignal.aborted, true, 'selecting another track cancels the waiting request');
+releaseDownload(first);
+await deferredLoad;
+assert.equal(deferred.current.id, second.id, 'an older download must not replace the selected track');
+let preparationReads = 0;
+globalThis.fetch = async (url, options) => {
+  assert.equal(options.method, undefined, 'service-owned tracks wait for automatic HLS preparation');
+  preparationReads++;
+  return new Response(JSON.stringify(preparationReads === 1
+    ? { status: 'ready', preparation: null }
+    : { status: 'streamed', preparation: 'completed' }), { headers: { 'Content-Type': 'application/json' } });
+};
+await deferred.loadDeferred(async () => ({ ...first, status: 'ready', owner_id: id(99), shared: true }));
+assert.equal(deferred.current.id, first.id);
+assert.equal(deferred.snapshot().paused, false, 'a downloaded service-owned track starts automatically');
+assert.deepEqual(deferredNotices, []);
+deferred.dispose();
 console.log('PASS: native audio playback, shared tokens, ordered queue, mute/seek, cancellation and lifecycle cleanup.');

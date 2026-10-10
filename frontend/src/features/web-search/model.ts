@@ -2,13 +2,17 @@ import { record, text } from '../../shared/api/validation';
 import { t } from '../../shared/i18n';
 
 export interface SearchTrack {
+  provider: 'itunes';
   external_id: string;
   title: string;
   artist: string;
   album: string | null;
-  duration_seconds: number | null;
   artwork_url: string | null;
-  store_url: string | null;
+  source_url: string | null;
+}
+
+export function searchTrackKey(track: Pick<SearchTrack, 'provider' | 'external_id'>): string {
+  return `${track.provider}:${track.external_id}`;
 }
 
 function secureUrl(value: unknown): string | null {
@@ -27,22 +31,19 @@ export function parseSearchTracks(value: unknown): SearchTrack[] {
   return rows.map((row) => {
     const item = record(row);
     const id = text(item.external_id);
-    if (!/^[1-9][0-9]{0,19}$/.test(id) || ids.has(id)) throw new Error(t('errors.invalidData'));
-    ids.add(id);
-    const duration = item.duration_seconds;
-    if (
-      duration !== null &&
-      (typeof duration !== 'number' || !Number.isSafeInteger(duration) || duration < 0)
-    )
+    if (item.provider !== 'itunes' || !/^[1-9][0-9]{0,19}$/.test(id))
       throw new Error(t('errors.invalidData'));
+    const key = searchTrackKey({ provider: item.provider, external_id: id });
+    if (ids.has(key)) throw new Error(t('errors.invalidData'));
+    ids.add(key);
     return {
+      provider: item.provider,
       external_id: id,
       title: text(item.title),
       artist: text(item.artist),
       album: item.album === null ? null : text(item.album),
-      duration_seconds: duration,
       artwork_url: secureUrl(item.artwork_url),
-      store_url: secureUrl(item.store_url),
+      source_url: secureUrl(item.source_url),
     };
   });
 }

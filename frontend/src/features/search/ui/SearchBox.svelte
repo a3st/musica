@@ -1,52 +1,75 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
   import TrackArtwork from '../../tracks/ui/TrackArtwork.svelte';
-  import { time } from '../../../shared/utils/time';
+  import CollectionScrollbar from '../../../shared/ui/CollectionScrollbar.svelte';
   import type { SearchState, LocalResult, RecentResult } from '../state.svelte';
   import type { SearchTrack } from '../../web-search/model';
+  import { searchTrackKey } from '../../web-search/model';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   import './SearchBox.css';
 
   let {
-    state,
+    state: controller,
     language,
     play,
     add,
+    playWeb,
+    menu,
+    ownsContextMenu = false,
+    waitingTrackKey = null,
   }: {
     state: SearchState;
     language: LanguageState;
     play: (result: LocalResult) => void;
     add: (track: SearchTrack) => void;
+    playWeb: (track: SearchTrack) => void;
+    menu: (track: SearchTrack, origin: HTMLElement) => void;
+    ownsContextMenu?: boolean;
+    waitingTrackKey?: string | null;
   } = $props();
   let container: HTMLDivElement;
   let input: HTMLInputElement;
   let restoringFocus = false;
+  let dropdown = $state<HTMLDivElement>();
   const results = $derived<RecentResult[]>(
-    !state.query.trim()
-      ? state.recent
-      : state.local.length
-        ? state.local.map((result) => ({ kind: 'local' as const, result }))
-        : state.web.tracks.map((track) => ({ kind: 'web' as const, track })),
+    !controller.query.trim()
+      ? controller.recent
+      : controller.local.length
+        ? controller.local.map((result) => ({ kind: 'local' as const, result }))
+        : controller.web.tracks.map((track) => ({ kind: 'web' as const, track })),
   );
-  const error = $derived(state.error || state.web.error);
+  const error = $derived(controller.error || controller.web.error);
 
   function closeOutside(event: MouseEvent): void {
-    if (event.target instanceof Node && !container.contains(event.target)) state.close();
+    if (inContextMenu(event)) return;
+    if (event.target instanceof Node && !container.contains(event.target)) controller.close();
+  }
+
+  function inContextMenu(event: Event): boolean {
+    return (
+      ownsContextMenu &&
+      event
+        .composedPath()
+        .some(
+          (element) =>
+            element instanceof Element && element.matches('#context-menu, #context-submenu'),
+        )
+    );
   }
 
   function keydown(event: KeyboardEvent): void {
     if (!(event.target instanceof Node) || !container.contains(event.target)) return;
-    if (event.key === 'Escape' && state.open) {
+    if (event.key === 'Escape' && controller.open) {
       event.preventDefault();
       event.stopPropagation();
-      state.close();
+      controller.close();
       restoringFocus = true;
       input.focus();
       restoringFocus = false;
     }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
-    state.open = true;
+    controller.open = true;
     const buttons = [
       ...container.querySelectorAll<HTMLButtonElement>('.search-result-action:not(:disabled)'),
     ];
@@ -59,8 +82,8 @@
   function activate(result: RecentResult): void {
     if (result.kind === 'local') play(result.result);
     else {
-      state.remember(result);
-      add(result.track);
+      controller.remember(result);
+      playWeb(result.track);
     }
   }
 </script>
@@ -69,7 +92,8 @@
   onclick={closeOutside}
   onkeydown={keydown}
   onfocusin={(event) => {
-    if (event.target instanceof Node && !container.contains(event.target)) state.close();
+    if (inContextMenu(event)) return;
+    if (event.target instanceof Node && !container.contains(event.target)) controller.close();
   }}
 />
 <div
@@ -82,7 +106,7 @@
     class="search-shell"
     onsubmit={(event) => {
       event.preventDefault();
-      void state.search();
+      void controller.search();
     }}
   >
     <label class="search">
@@ -95,56 +119,67 @@
         aria-haspopup="dialog"
         placeholder={language.t('search.placeholder')}
         aria-label={language.t('search.tracks')}
-        aria-expanded={state.open}
+        aria-expanded={controller.open}
         aria-controls="search-results"
         aria-autocomplete="list"
         autocomplete="off"
         maxlength="256"
-        value={state.query}
-        oninput={(event) => state.setQuery(event.currentTarget.value)}
+        value={controller.query}
+        oninput={(event) => controller.setQuery(event.currentTarget.value)}
         onfocus={() => {
           if (restoringFocus) return;
-          state.open = true;
-          if (state.query.trim() && !state.searched && !state.loading) void state.search();
+          controller.open = true;
+          if (controller.query.trim() && !controller.searched && !controller.loading)
+            void controller.search();
         }}
       />
     </label>
   </form>
-  {#if state.open}
+  {#if controller.open}
     <div
       id="search-results"
+      bind:this={dropdown}
       class="search-dropdown"
       role="dialog"
       tabindex="-1"
       aria-label={language.t('search.results')}
-      aria-busy={state.loading}
+      aria-busy={controller.loading}
     >
       <h2>
         {language.t(
-          !state.query.trim()
+          !controller.query.trim()
             ? 'search.recent'
-            : state.local.length
+            : controller.local.length
               ? 'search.libraryResults'
               : 'search.results',
         )}
       </h2>
-      {#if state.loading}
+      {#if controller.loading}
         <p class="search-message" role="status">
           <span class="spinner"></span>{language.t('web.searching')}
         </p>
       {:else if error}
         <div class="search-message" role="alert">
           <span>{error}</span>
-          <button class="button secondary" onclick={() => void state.search()}
+          <button class="button secondary" onclick={() => void controller.search()}
             >{language.t('common.retry')}</button
           >
         </div>
       {:else if results.length}
         <ul class="search-results-list">
-          {#each results as result (result.kind === 'local' ? result.result.track.id : result.track.external_id)}
+          {#each results as result (result.kind === 'local' ? result.result.track.id : searchTrackKey(result.track))}
             {@const track = result.kind === 'local' ? result.result.track : result.track}
             <li class="search-result" data-source={result.kind}>
-              <div class="search-result-art" aria-hidden="true">
+              <button
+                class="search-result-art"
+                disabled={result.kind === 'local'
+                  ? result.result.track.status === 'pending'
+                  : waitingTrackKey === searchTrackKey(result.track)}
+                aria-label={language.t('tracks.play', { title: track.title })}
+                aria-busy={result.kind === 'web' &&
+                  waitingTrackKey === searchTrackKey(result.track)}
+                onclick={() => activate(result)}
+              >
                 {#if result.kind === 'web' && result.track.artwork_url}
                   <img
                     src={result.track.artwork_url}
@@ -155,13 +190,18 @@
                 {:else if result.kind === 'local'}
                   <TrackArtwork track={result.result.track} />
                 {:else}<Icon name="music" />{/if}
-              </div>
+                <span class="search-art-play">
+                  {#if result.kind === 'web' && waitingTrackKey === searchTrackKey(result.track)}
+                    <span class="spinner"></span>
+                  {:else}<Icon name="play" />{/if}
+                </span>
+              </button>
               <button
                 class="search-result-action"
                 disabled={result.kind === 'local'
                   ? result.result.track.status === 'pending'
-                  : !!state.web.additions[result.track.external_id]}
-                aria-label={language.t(result.kind === 'local' ? 'tracks.play' : 'web.addTrack', {
+                  : waitingTrackKey === searchTrackKey(result.track)}
+                aria-label={language.t('tracks.play', {
                   title: track.title,
                 })}
                 onclick={() => activate(result)}
@@ -176,32 +216,47 @@
                 </span>
                 {#if result.kind === 'local'}
                   <Icon name="play" />
-                {:else}
-                  <span class="search-result-duration"
-                    >{result.track.duration_seconds === null
-                      ? ''
-                      : time(result.track.duration_seconds)}</span
-                  >
-                  <span class="search-result-add"
-                    >{language.t(
-                      state.web.additions[result.track.external_id] === 'added'
-                        ? 'web.added'
-                        : state.web.additions[result.track.external_id] === 'adding'
-                          ? 'web.adding'
-                          : 'web.add',
-                    )}</span
-                  >
-                  <Icon name="plus" />
                 {/if}
               </button>
+              {#if result.kind === 'web'}
+                <button
+                  class="icon-button search-result-more"
+                  data-search-menu={searchTrackKey(result.track)}
+                  aria-haspopup="menu"
+                  aria-label={language.t('tracks.actions', { title: track.title })}
+                  onclick={(event) => menu(result.track, event.currentTarget)}
+                  ><Icon name="more" /></button
+                >
+                <button
+                  class="icon-button search-result-add"
+                  disabled={!!controller.web.additions[searchTrackKey(result.track)]}
+                  aria-label={controller.web.additions[searchTrackKey(result.track)] === 'added'
+                    ? language.t('web.added')
+                    : language.t('web.addTrack', { title: track.title })}
+                  title={language.t('web.addTrack', { title: track.title })}
+                  onclick={() => {
+                    controller.remember(result);
+                    add(result.track);
+                  }}
+                >
+                  {#if controller.web.additions[searchTrackKey(result.track)] === 'adding'}<span
+                      class="spinner"
+                    ></span>
+                  {:else}<Icon
+                      name={controller.web.additions[searchTrackKey(result.track)] === 'added'
+                        ? 'check'
+                        : 'plus'}
+                    />{/if}
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>
       {:else}
         <p class="search-message" role="status">
           {language.t(
-            state.query.trim()
-              ? state.query.trim().length < 2
+            controller.query.trim()
+              ? controller.query.trim().length < 2
                 ? 'search.moreCharacters'
                 : 'web.empty'
               : 'search.recentEmpty',
@@ -209,5 +264,6 @@
         </p>
       {/if}
     </div>
+    <CollectionScrollbar target={dropdown} label={language.t('search.results')} />
   {/if}
 </div>
