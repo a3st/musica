@@ -21,6 +21,7 @@ export function errorMessage(error: unknown): string {
       not_found: t('errors.notFound'),
       track_not_found: t('tracks.notFound'),
       internal_error: t('errors.requestFailed'),
+      web_search_unavailable: t('web.unavailable'),
       hls_not_ready: t('player.notReady'),
     };
     return messages[error.code] ?? t('errors.requestStatus', { status: error.status });

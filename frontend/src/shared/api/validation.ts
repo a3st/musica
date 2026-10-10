@@ -26,6 +26,13 @@ export function bool(data: unknown): boolean {
   return data;
 }
 
+export function nullableNonNegativeInteger(data: unknown): number | null {
+  if (data === null) return null;
+  if (typeof data !== 'number' || !Number.isSafeInteger(data) || data < 0)
+    throw new Error(t('errors.invalidData'));
+  return data;
+}
+
 export function choice<T extends string>(data: unknown, values: readonly T[]): T {
   if (typeof data !== 'string' || !values.includes(data as T))
     throw new Error(t('errors.unknownValue'));

@@ -25,7 +25,8 @@ fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 test "Spotify import requires a session before accessing storage" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
     var context = httpz.testing.init(.{});
     defer context.deinit();
     context.header("content-type", "application/json");

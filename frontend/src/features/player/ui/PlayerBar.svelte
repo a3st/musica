@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
-  import CoverArt from '../../playlists/ui/CoverArt.svelte';
+  import TrackArtwork from '../../tracks/ui/TrackArtwork.svelte';
   import { time } from '../../../shared/utils/time';
   import type { PlayerState } from '../state.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
@@ -23,9 +23,10 @@
 <footer class="player">
   <div class="now-playing" hidden={!value.current}>
     <div id="now-art" class="mini-cover empty-cover">
-      {#if value.current && controller.cover}<CoverArt
-          playlist={controller.cover}
-          mini
+      {#if value.current}<TrackArtwork
+          track={value.current}
+          shareToken={controller.shareToken(value.current.id)}
+          eager
         />{:else}<Icon name="music" />{/if}
     </div>
     <div class="now-text">

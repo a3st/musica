@@ -2,6 +2,7 @@ const std = @import("std");
 const httpz = @import("httpz");
 const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
+const ITunesClient = @import("infrastructure/itunes.zig").ITunesClient;
 const api = @import("helpers/api.zig");
 
 /// Общие ресурсы и настройки HTTP-обработчиков и фоновых задач.
@@ -12,24 +13,29 @@ pub const App = struct {
     db: Database,
     /// Общий S3-клиент с пулом HTTP-соединений.
     storage: S3,
+    /// Общий клиент каталога; освобождается после остановки HTTP-сервера.
+    catalog: ITunesClient,
 
     /// Максимальный размер тела запроса и загружаемого файла в байтах.
     max_upload_bytes: usize,
 
-    ffmpeg_path: []const u8 = "ffmpeg",
-    ytdlp_path: []const u8 = "yt-dlp",
+    ffmpeg_path: []const u8,
+    ffprobe_path: []const u8,
+    metadata_tmp_dir: []const u8,
+    metadata_timeout_seconds: u32,
+    ytdlp_path: []const u8,
 
-    spotify_tmp_dir: []const u8 = "/tmp/musica-spotify",
-    spotify_timeout_seconds: u32 = 900,
+    spotify_tmp_dir: []const u8,
+    spotify_timeout_seconds: u32,
 
-    hls_tmp_dir: []const u8 = "/tmp/musica-hls",
-    hls_timeout_seconds: u32 = 900,
+    hls_tmp_dir: []const u8,
+    hls_timeout_seconds: u32,
 
-    cookie_secure: bool = false,
-    registration_enabled: bool = false,
+    cookie_secure: bool,
+    registration_enabled: bool,
 
     /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
-    shared_track_retention_seconds: u32 = 7 * 24 * 60 * 60,
+    shared_track_retention_seconds: u32,
 
     /// Возвращает стандартный ответ API для неизвестного маршрута.
     pub fn notFound(_: *App, _: *httpz.Request, res: *httpz.Response) !void {

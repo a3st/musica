@@ -47,6 +47,26 @@ const beforeRemoval = changes;
 engine.remove(third.id);
 assert.ok(changes > beforeRemoval, 'removing a queued track updates a paused UI too');
 
+const sourceBeforeMetadata = engine.audio.src;
+const elapsedBeforeMetadata = engine.audio.currentTime;
+engine.enqueue(third);
+const queueBeforeMetadata = engine.upcoming.map(item => item.id);
+const updated = { ...engine.current, artwork_key: 'tracks/artwork/new.jpg', duration_seconds: 60 };
+const updatedQueued = { ...third, artwork_key: 'tracks/artwork/queued.jpg' };
+engine.updateMetadata([updated, updatedQueued]);
+assert.equal(engine.current.artwork_key, updated.artwork_key);
+assert.equal(engine.upcoming.find(item => item.id === third.id).artwork_key, updatedQueued.artwork_key);
+assert.equal(engine.audio.src, sourceBeforeMetadata, 'metadata updates must not reload audio');
+assert.equal(engine.audio.currentTime, elapsedBeforeMetadata);
+assert.deepEqual(engine.upcoming.map(item => item.id), queueBeforeMetadata);
+
+const { trackArtworkUrl } = await import(moduleUrl(new URL('../../src/features/tracks/image.ts', import.meta.url)));
+assert.equal(trackArtworkUrl(first), null, 'missing artwork does not make a request');
+const artworkUrl = new URL(trackArtworkUrl(updated, 'a'.repeat(64)), 'http://localhost');
+assert.equal(artworkUrl.pathname, `/api/tracks/${updated.id}/artwork`);
+assert.equal(artworkUrl.searchParams.get('v'), updated.artwork_key);
+assert.equal(artworkUrl.searchParams.get('share_token'), 'a'.repeat(64));
+
 let release;
 const waiting = new Promise(resolve => { release = resolve; });
 globalThis.fetch = async () => { await waiting; return new Response(JSON.stringify({ status: 'streamed', preparation: 'completed' }), { headers: { 'Content-Type': 'application/json' } }); };

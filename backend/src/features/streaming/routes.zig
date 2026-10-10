@@ -98,7 +98,8 @@ fn segment(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 test "HLS routes validate IDs and segment names before accessing dependencies" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
     var bad_id = httpz.testing.init(.{});
     defer bad_id.deinit();
     bad_id.param("id", "../secret");

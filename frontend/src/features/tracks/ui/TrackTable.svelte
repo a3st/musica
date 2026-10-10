@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
+  import TrackArtwork from './TrackArtwork.svelte';
   import type { Track } from '../model';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   let {
@@ -13,6 +14,7 @@
     search,
     writable,
     upload,
+    shareToken = null,
   }: {
     tracks: Track[];
     currentId: string | null;
@@ -24,6 +26,7 @@
     search: string;
     writable: boolean;
     upload: () => void;
+    shareToken?: string | null;
   } = $props();
 </script>
 
@@ -63,11 +66,7 @@
         ></button
       >
       <div class="track-title">
-        <span
-          class="track-art"
-          style={`--art-hue:${(parseInt(track.id.slice(0, 4), 16) % 260) + index * 35}`}
-          aria-hidden="true"><Icon name="music" /></span
-        >
+        <TrackArtwork {track} {shareToken} />
         <div class="track-metadata"><strong>{track.title}</strong><span>{track.artist}</span></div>
       </div>
       <span class="track-artist">{track.artist}</span><span

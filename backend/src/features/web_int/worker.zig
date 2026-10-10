@@ -208,7 +208,10 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024, .ffmpeg_path = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe" };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
+    app.ffmpeg_path = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe";
+    app.ytdlp_path = "yt-dlp";
     const argv = try buildYtdlpArguments(&app, arena.allocator(), .{ .title = "Title \"; echo hi", .artist = "Artist" });
     try std.testing.expectEqualStrings("ytsearch1:Artist Title \"; echo hi", argv[argv.len - 1]);
     try std.testing.expectEqualStrings("--", argv[argv.len - 2]);

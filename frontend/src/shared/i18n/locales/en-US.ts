@@ -1,6 +1,28 @@
 import type { Messages } from '../types';
 
 export const english = {
+  'search.results': 'Search results',
+  'search.libraryResults': 'In your library',
+  'search.library': 'Library',
+  'search.itunes': 'iTunes',
+  'search.recent': 'Recent finds',
+  'search.recentEmpty': 'Selected tracks will appear here. Start typing a song or artist.',
+  'search.moreCharacters': 'Enter at least two characters to search iTunes.',
+  'web.heading': 'Discover new music',
+  'web.description':
+    'Search the iTunes catalog. Added songs will appear in Uploads and be prepared for playback.',
+  'web.hint': 'Enter a song title or artist in the search bar and press Enter.',
+  'web.empty': 'No songs found. Try a different title or artist.',
+  'web.searching': 'Searching for songs…',
+  'web.search': 'Search the web',
+  'web.add': 'Add',
+  'web.adding': 'Adding…',
+  'web.added': 'Added',
+  'web.addTrack': 'Add “{title}” to Uploads',
+  'web.store': 'Open “{title}” in iTunes',
+  'web.unavailable': 'The catalog is temporarily unavailable. Try again later.',
+  'tracks.removeSharedDescription':
+    '“{title}” will be removed from Uploads and remain in other playlists.',
   'app.finishOrCancelUploads': 'Finish or cancel your uploads first',
   'app.finishUploads': 'Finish your uploads first',
   'app.home': 'Musica — home',

@@ -10,6 +10,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test:ui": "node tests/e2e/ui.mjs",
     "test:spotify": "node tests/unit/spotify.mjs",
+    "test:web": "node tests/unit/web-search.mjs",
+    "test:web-ui": "node tests/e2e/web-search.mjs",
     "test:pwa": "node tests/e2e/pwa.mjs",
     "test:proxy": "node tests/integration/proxy.mjs",
     "format": "prettier --write src vite.config.ts svelte.config.js",

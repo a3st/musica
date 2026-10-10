@@ -84,6 +84,14 @@ export class PlayerEngine {
       repeat: this.repeat,
     };
   }
+  /** Обновляет данные текущего трека и очереди, сохраняя воспроизведение и порядок. */
+  updateMetadata(tracks: Track[]): void {
+    const updated = new Map(tracks.map((track) => [track.id, track]));
+    if (this.current) this.current = updated.get(this.current.id) ?? this.current;
+    this.queue = this.queue.map((track) => updated.get(track.id) ?? track);
+    this.emit();
+  }
+
   seek(value: number): void {
     if (Number.isFinite(this.audio.duration))
       this.audio.currentTime = (value / 1000) * this.audio.duration;

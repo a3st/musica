@@ -161,6 +161,20 @@ fn uploadImpl(
             return err;
         };
         try repository.finishUpload(conn, canonical_id, location.key, mime, data.len);
+        _ = try jobs_repository.enqueue(
+            conn,
+            arena,
+            model.metadata_job_kind,
+            canonical_id,
+            model.MetadataPayload{
+                .track_id = canonical_id,
+                .bucket = location.bucket,
+                .key = location.key,
+                .size = data.len,
+            },
+            0,
+            3,
+        );
         try cleanup_service.cancelScheduledCleanup(conn, reservation);
 
         try conn.commit();
@@ -175,4 +189,26 @@ fn releaseUpload(app: *App, lease: Job) !void {
     defer conn.release();
 
     jobs_repository.fail(conn, lease, false, 0) catch |err| if (err != error.LeaseLost) return err;
+}
+
+/// Проверяет доступ к обложке и читает JPEG из S3 после освобождения соединения БД.
+pub fn readArtwork(
+    app: *App,
+    arena: std.mem.Allocator,
+    id: []const u8,
+    user: ?[]const u8,
+    share_hash: ?[]const u8,
+) ![]const u8 {
+    const location = blk: {
+        const conn = try app.db.acquire();
+        defer conn.release();
+
+        break :blk try repository.readArtwork(conn, arena, id, user, share_hash);
+    };
+
+    return app.storage.getInBucket(arena, location.bucket, location.key, model.max_artwork_bytes) catch |err| {
+        std.log.err("Track artwork storage read failed: {s}", .{@errorName(err)});
+        if (err == error.Canceled or err == error.StorageTimeout) return err;
+        return error.StorageUnavailable;
+    };
 }

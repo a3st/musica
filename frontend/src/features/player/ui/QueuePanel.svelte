@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
+  import TrackArtwork from '../../tracks/ui/TrackArtwork.svelte';
   import type { PlayerState } from '../state.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   import type { Track } from '../../tracks/model';
@@ -12,7 +13,7 @@
       class="queue-track"
       data-queue-play={track.id}
       onclick={() => controller.engine.playQueued(track.id)}
-      ><span class="track-art"><Icon name={current ? 'play' : 'music'} /></span><span
+      ><TrackArtwork {track} shareToken={controller.shareToken(track.id)} /><span
         ><strong>{track.title}</strong><small>{track.artist}</small></span
       ></button
     >{#if !current}<button

@@ -7,6 +7,32 @@ pub const upload_job_kind = "upload_track";
 /// Вид задачи удаления объектов из S3.
 pub const cleanup_job_kind = "delete_s3_objects";
 
+/// Вид задачи чтения длительности и извлечения встроенной обложки.
+pub const metadata_job_kind = "inspect_track";
+
+/// Максимальный размер нормализованной JPEG-обложки.
+pub const max_artwork_bytes = 2 * 1024 * 1024;
+
+/// Исходник для обработки; адрес фиксируется при публикации загрузки.
+pub const MetadataPayload = struct {
+    track_id: []const u8,
+    bucket: []const u8,
+    key: []const u8,
+    size: usize,
+};
+
+/// Арендованная задача извлечения метаданных трека.
+pub const MetadataTask = struct {
+    job: Job,
+    payload: MetadataPayload,
+};
+
+/// Длительность реального файла и ключ отдельно опубликованной обложки.
+pub const Metadata = struct {
+    duration_seconds: ?u32,
+    artwork_key: ?[]const u8,
+};
+
 /// Адрес исходного файла трека в S3; key — ключ объекта внутри бакета.
 pub const UploadLocation = struct {
     bucket: []const u8,
@@ -46,6 +72,7 @@ pub const CleanupTask = struct {
 pub const Files = struct {
     bucket: []const u8,
     key: []const u8,
+    artwork_key: ?[]const u8,
 
     /// Префикс опубликованного HLS; null, если HLS отсутствует.
     prefix: ?[]const u8,

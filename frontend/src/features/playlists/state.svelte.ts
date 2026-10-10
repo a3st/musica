@@ -41,7 +41,12 @@ export class PlaylistsState {
     this.items = await playlistsApi.playlists();
   }
   async poll(): Promise<void> {
-    if (!this.selected?.tracks.some((track) => track.status !== 'streamed')) return;
+    if (
+      !this.selected?.tracks.some(
+        (track) => track.status !== 'streamed' || track.duration_seconds == null,
+      )
+    )
+      return;
     const id = this.selected.id;
     const version = this.version;
     const updated = this.shareToken

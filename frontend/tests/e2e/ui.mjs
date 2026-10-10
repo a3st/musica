@@ -26,8 +26,8 @@ const user = { id: id(1), username: 'music_lover', default_playlist_id: id(2) };
 const metadata = (n, title, isDefault = false) => ({ id: id(n), owner_id: user.id, title, description: '',
   tags: ['ambient'], visibility: 'private', is_default: isDefault, image_key: null, role: 'owner', track_count: 0 });
 const tracks = [
-  { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed' },
-  { id: id(11), owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed' },
+  { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed', artwork_key: 'tracks/first/artwork/initial.jpg' },
+  { id: id(11), owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed', artwork_key: 'missing.jpg' },
   { id: id(12), owner_id: user.id, title: '<img src=x onerror=alert(1)>', artist: 'Test', status: 'pending' },
 ];
 let playlists = [metadata(2, 'Uploads', true), metadata(3, 'Тихие вечера'), metadata(4, 'В дороге')];
@@ -133,6 +133,10 @@ await page.route('**/api/**', async (route) => {
       if (!cookie.includes(`musica_session=${'b'.repeat(64)}`)) return json({ error: 'unauthorized' }, 401);
     }
     const t = tracks.find((t) => t.id === match[1]);
+    if (match[2] === '/artwork') {
+      if (!t?.artwork_key || t.artwork_key === 'missing.jpg') return json({ error: 'not_found' }, 404);
+      return route.fulfill({ contentType: 'image/png', body: imageBytes });
+    }
     if (method === 'DELETE') { for (const [key, list] of members) members.set(key, list.filter((t) => t.id !== match[1])); return route.fulfill({ status: 204 }); }
     if (match[2] === '/file') { t.status = 'ready'; return json({ status: t.status }); }
     if (match[2] === '/hls' && method === 'POST') { t.status = 'streamed'; return json({ status: 'streamed', preparation: 'completed' }); }
@@ -307,12 +311,25 @@ try {
   await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light', 'theme survives reload');
   await toggleTheme();
-  assert.equal(await page.locator('.track-title img').count(), 0, 'track title must be escaped');
-  await page.locator('#search').fill('m83'); assert.equal(await page.locator('.track-row').count(), 1);
-  await page.locator('#search').fill('nothing matches'); await page.getByRole('heading', { name: 'Ничего не нашлось' }).waitFor();
-  await page.locator('#search').fill(''); await page.locator(`[data-play="${id(10)}"]`).click();
+  assert.equal(await page.locator('.track-metadata img').count(), 0, 'track title must be escaped');
+  await page.locator(`[data-track-row="${id(10)}"] .track-art img`).waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-track-row="00000000-0000-4000-8000-000000000011"] .track-art img'));
+  assert.equal(await page.locator(`[data-track-row="${id(12)}"] .track-art img`).count(), 0, 'tracks without artwork use a placeholder');
+  const rowsBeforeSearch = await page.locator('.track-row').count();
+  await page.locator('#search').fill('m83'); await page.locator('.search-result[data-source=local]').waitFor();
+  await page.waitForFunction(() => document.querySelector('.search-result[data-source=local] img')?.naturalWidth > 0);
+  assert.equal(await page.locator('.track-row').count(), rowsBeforeSearch, 'dropdown search leaves the playlist unchanged');
+  await page.locator('#search').press('ArrowDown');
+  assert.equal(await page.locator('.search-result-action').evaluate(element => element === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await page.locator('#search-results').waitFor({ state: 'detached' });
   await page.locator('#player-play[aria-label="Пауза"]').waitFor();
   assert.equal(await page.locator('#now-title').textContent(), 'Midnight City');
+  await page.waitForFunction(() => document.querySelector('#now-art img')?.naturalWidth > 0);
+  const artworkManifestRequests = manifestRequests;
+  tracks[0].artwork_key = 'tracks/first/artwork/updated.jpg';
+  await page.waitForFunction(() => document.querySelector('#now-art img')?.getAttribute('src')?.includes('updated.jpg'));
+  assert.equal(manifestRequests, artworkManifestRequests, 'new artwork does not restart playback');
   const currentRow = page.locator(`[data-track-row="${id(10)}"]`);
   const rowPlay = currentRow.locator('.track-play');
   await rowPlay.filter({ has: page.locator('svg path[stroke-width="4"]') }).waitFor();
@@ -366,6 +383,7 @@ try {
   await overflow();
   assert.equal(await page.locator('#queue-panel').getAttribute('inert'), null);
   assert.equal(await page.locator('[data-queue-play]').count(), 2);
+  await page.waitForFunction(() => document.querySelector('#queue-panel .queue-current img')?.naturalWidth > 0);
   await page.locator(`[data-queue-remove="${id(11)}"]`).click();
   assert.equal(await page.locator('[data-queue-play]').count(), 1);
   await page.locator(`[data-track-row="${id(11)}"]`).click({ button: 'right' });
@@ -445,7 +463,7 @@ try {
   await page.locator('#playlist-image-input').setInputFiles({ name: 'updated.png', mimeType: 'image/png', buffer: updatedImageBytes });
   await page.locator('#playlist-save').click(); await page.getByRole('heading', { name: 'Updated mix', exact: true }).waitFor();
   assert.notEqual(created.image_key, originalImageKey);
-  const coverSelectors = ['.hero-cover img', `.sidebar [data-playlist="${created.id}"] img`, '#now-art img'];
+  const coverSelectors = ['.hero-cover img', `.sidebar [data-playlist="${created.id}"] img`];
   for (const selector of coverSelectors) {
     await page.waitForFunction(selector => {
       const image = document.querySelector(selector);
@@ -458,7 +476,7 @@ try {
       const context = canvas.getContext('2d'); context.drawImage(image, 0, 0, 1, 1);
       return [...context.getImageData(0, 0, 1, 1).data];
     });
-    assert.ok(pixel[2] > 200 && pixel[0] < 20, 'replacement artwork is rendered in the playlist, sidebar and player');
+    assert.ok(pixel[2] > 200 && pixel[0] < 20, 'replacement artwork is rendered in the playlist and sidebar');
   }
   assert.equal(created.description, 'New description'); assert.equal(created.visibility, 'public'); assert.deepEqual(created.tags, ['ambient']);
   await page.locator(`.sidebar [data-playlist="${created.id}"]`).click({ button: 'right' });

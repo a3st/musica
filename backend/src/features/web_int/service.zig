@@ -8,6 +8,52 @@ const tracks_model = @import("../tracks/model.zig");
 const playlists_repository = @import("../playlists/repository.zig");
 const users_repository = @import("../users/repository.zig");
 
+/// Ищет песни в iTunes; общий кеш живёт десять минут, соединение БД не удерживается во время HTTP.
+pub fn search(app: *App, arena: std.mem.Allocator, term: []const u8) ![]const model.SearchTrack {
+    const query = try model.validateSearch(term);
+    const key = try std.fmt.allocPrint(arena, "itunes:search:US:{s}", .{query});
+    if (try readSearchCache(app, arena, key)) |body| {
+        return (try std.json.parseFromSlice([]const model.SearchTrack, arena, body, .{ .allocate = .alloc_always })).value;
+    }
+
+    const tracks = try app.catalog.search(arena, query);
+    const body = try std.json.Stringify.valueAlloc(arena, tracks, .{});
+    const conn = try app.db.acquire();
+    defer conn.release();
+    try repository.writeSearchCache(conn, key, body);
+
+    return tracks;
+}
+
+/// Читает кеш и освобождает соединение до запроса внешнего каталога.
+fn readSearchCache(app: *App, arena: std.mem.Allocator, key: []const u8) !?[]const u8 {
+    const conn = try app.db.acquire();
+    defer conn.release();
+    return repository.readSearchCache(conn, arena, key);
+}
+
+/// Разрешает ID через каталог и атомарно добавляет общий трек в личную библиотеку.
+pub fn addToLibrary(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Selection) ![]const u8 {
+    try model.validateExternalId(input.external_id);
+    const key = try std.fmt.allocPrint(arena, "itunes:lookup:US:{s}", .{input.external_id});
+    const track = if (try readSearchCache(app, arena, key)) |body|
+        (try std.json.parseFromSlice(model.SearchTrack, arena, body, .{ .allocate = .alloc_always })).value
+    else
+        try app.catalog.lookup(arena, input.external_id);
+
+    const conn = try app.db.acquire();
+    defer conn.release();
+    try repository.writeSearchCache(conn, key, try std.json.Stringify.valueAlloc(arena, track, .{}));
+    try conn.begin();
+    errdefer conn.rollback() catch {};
+    const id = try create(conn, arena, app.storage.bucket, user, .{
+        .title = track.title,
+        .artist = track.artist,
+    }, .{ .provider = "itunes", .external_id = track.external_id });
+    try conn.commit();
+    return id;
+}
+
 /// Переиспользует или создаёт общий трек у сервисной учётки, ставит загрузку в очередь и добавляет его в Uploads пользователя.
 /// Принимает соединение с транзакцией вызывающего кода; ID трека выделяется в arena.
 pub fn create(

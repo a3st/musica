@@ -103,22 +103,30 @@
 .timeline > span:last-child {
   text-align: right;
 }
-#player-seek::-webkit-slider-thumb {
+#player-seek::-webkit-slider-thumb,
+#volume::-webkit-slider-thumb {
   opacity: 0;
   transition: opacity 0.15s;
 }
-#player-seek::-moz-range-thumb {
+#player-seek::-moz-range-thumb,
+#volume::-moz-range-thumb {
   opacity: 0;
   transition: opacity 0.15s;
 }
 #player-seek:hover::-webkit-slider-thumb,
 #player-seek:focus-visible::-webkit-slider-thumb,
-#player-seek:active::-webkit-slider-thumb {
+#player-seek:active::-webkit-slider-thumb,
+#volume:hover::-webkit-slider-thumb,
+#volume:focus-visible::-webkit-slider-thumb,
+#volume:active::-webkit-slider-thumb {
   opacity: 1;
 }
 #player-seek:hover::-moz-range-thumb,
 #player-seek:focus-visible::-moz-range-thumb,
-#player-seek:active::-moz-range-thumb {
+#player-seek:active::-moz-range-thumb,
+#volume:hover::-moz-range-thumb,
+#volume:focus-visible::-moz-range-thumb,
+#volume:active::-moz-range-thumb {
   opacity: 1;
 }
 .player-right {

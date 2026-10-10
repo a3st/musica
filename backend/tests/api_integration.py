@@ -176,6 +176,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
             S3_SECRET_ACCESS_KEY='test-secret',
             HLS_WORKER_ENABLED=str(worker).lower(),
             SPOTIFY_WORKER_ENABLED='false',
+            TRACK_METADATA_WORKER_ENABLED='false',
         )
         command = [
             'docker', 'run', '-d', '--name', name,
@@ -208,6 +209,19 @@ def run_api_checks(optimize="Debug", backend_image=None):
             "-f",
             "/migrations/001_init.sql",
         )
+        migrated_track = execute_sql(
+            "WITH owner AS (INSERT INTO musica.users(username,kind) VALUES ('migration_fixture','system') RETURNING id) "
+            "INSERT INTO musica.tracks(title,artist,owner_id,storage_bucket,object_key,status,content_type,size_bytes,uploaded_at) "
+            "SELECT 'Migration fixture','Test',id,'historical','existing.mp3','ready','audio/mpeg',100,now() FROM owner RETURNING id::text"
+        ).splitlines()[0]
+        run_compose(
+            "exec", "-T", "postgres", "psql", "-U", "musica", "-d", "musica",
+            "-v", "ON_ERROR_STOP=1", "-f", "/migrations/002_track_metadata.sql",
+        )
+        assert json.loads(execute_sql(f"SELECT payload FROM public.jobs WHERE kind='inspect_track' AND dedupe_key='{migrated_track}'")) == {
+            'track_id': migrated_track, 'bucket': 'historical', 'key': 'existing.mp3', 'size': 100,
+        }
+        execute_sql(f"DELETE FROM public.jobs WHERE kind='inspect_track' AND dedupe_key='{migrated_track}'; DELETE FROM musica.tracks WHERE id='{migrated_track}'; DELETE FROM musica.playlists WHERE owner_id=(SELECT id FROM musica.users WHERE username='migration_fixture'); DELETE FROM musica.users WHERE username='migration_fixture'")
         assert execute_sql((
             "SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_schema, "
             "table_name) FROM information_schema.tables WHERE table_schema IN ('musica','public') "
@@ -234,6 +248,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
             S3_ENDPOINT=f"http://127.0.0.1:{storage.server_port}",
             HLS_WORKER_ENABLED='false',
             SPOTIFY_WORKER_ENABLED='false',
+            TRACK_METADATA_WORKER_ENABLED='false',
         )
         executable = BACKEND / "zig-out" / "bin" / ("musica-backend.exe" if os.name == "nt" else "musica-backend")
         if backend_image:
@@ -275,7 +290,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
                 if path != "/api/health":
                     assert response.headers.get("Cache-Control") == "no-store"
                 if raw and expected == 200:
-                    assert response.headers.get('Content-Type') == ('image/png' if path.endswith('/image') else 'application/vnd.apple.mpegurl' if 'index.m3u8' in path else 'video/mp2t')
+                    assert response.headers.get('Content-Type') == ('image/jpeg' if '/artwork' in path else 'image/png' if path.endswith('/image') else 'application/vnd.apple.mpegurl' if 'index.m3u8' in path else 'video/mp2t')
                 if path in ('/api/auth/register', '/api/auth/login') and expected in (200, 201):
                     session = response.headers['Set-Cookie']
                     assert 'HttpOnly' in session and 'SameSite=Strict' in session and 'Path=/api' in session
@@ -903,6 +918,42 @@ def run_api_checks(optimize="Debug", backend_image=None):
             subprocess.run(['zig', 'build', 'test-download-fixture'], cwd=BACKEND, check=True)
             from spotify_integration import check_spotify_import
             check_spotify_import(api_request, execute_sql, env, executable, BACKEND)
+
+            def block_artwork(prefix):
+                """Задерживает одну запись artwork для проверки смены аренды между нодами."""
+                nonlocal blocked_path
+                blocked_path = prefix
+                upload_arrived.clear()
+                release_upload.clear()
+                return upload_arrived, release_upload
+
+            from metadata_integration import check_track_metadata
+            check_track_metadata(api_request, execute_sql, env, executable, BACKEND, objects, block_artwork, optimize)
+
+        # Catalog fixtures are seeded only in the disposable database; no Apple request is needed.
+        web_song = {
+            'external_id': '123456', 'title': 'Web fixture (Live)', 'artist': 'Web artist',
+            'album': 'Web album', 'duration_seconds': 123, 'artwork_url': None, 'store_url': None,
+        }
+        for key, value in [('itunes:search:US:Web fixture', [web_song]), ('itunes:lookup:US:123456', web_song)]:
+            body = json.dumps(value)
+            execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('{key}', '{body}', clock_timestamp() + interval '10 minutes')")
+        api_request('GET', '/api/web/search?q=Web%20fixture', expected=401)
+        api_request('GET', '/api/web/search?q=x', token=a, expected=400)
+        assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['tracks'] == [web_song]
+        api_request('POST', '/api/web/tracks', {'external_id': '123456'}, expected=401)
+        api_request('POST', '/api/web/tracks', {'external_id': '123&other=1'}, token=a, expected=400)
+        first_web = api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=a, expected=202)['id']
+        second_web = api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=b, expected=202)['id']
+        assert first_web == second_web
+        assert execute_sql(f"SELECT count(*) FROM musica.track_sources WHERE provider='itunes' AND external_id='123456' AND track_id='{first_web}'") == '1'
+        assert execute_sql(f"SELECT count(*) FROM public.jobs WHERE kind='download_track' AND dedupe_key='{first_web}'") == '1'
+        assert execute_sql(f"SELECT u.kind FROM musica.users u JOIN musica.tracks t ON t.owner_id=u.id WHERE t.id='{first_web}'") == 'system'
+        api_request('DELETE', '/api/tracks/' + first_web, token=a, expected=204)
+        assert execute_sql(f"SELECT count(*) FROM musica.tracks WHERE id='{first_web}'") == '1'
+        bob_default = api_request('GET', '/api/users/me', token=b)['default_playlist_id']
+        assert any(t['id'] == first_web for t in api_request('GET', '/api/playlists/' + bob_default, token=b)['tracks'])
+        print('PASS: Web search ACL/cache, verified catalog selection, shared ownership, deduplication and personal unlink.')
         assert api_request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:
             diagnostics = subprocess.check_output(

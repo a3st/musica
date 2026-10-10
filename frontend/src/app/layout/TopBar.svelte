@@ -2,6 +2,7 @@
   import { getApplication } from '../context';
   import Icon from '../../shared/ui/Icon.svelte';
   import Brand from '../../shared/ui/Brand.svelte';
+  import SearchBox from '../../features/search/ui/SearchBox.svelte';
   const app = getApplication();
   let profileOpen = $state(false);
   let profile: HTMLDivElement;
@@ -28,24 +29,14 @@
       app.libraryOpen = true;
     }}><Icon name="library" /></button
   >
-  <div class="search-shell">
-    <label class="search"
-      ><Icon name="search" /><input
-        id="search"
-        type="search"
-        placeholder={app.language.t('search.placeholder')}
-        aria-label={app.language.t('search.tracks')}
-        autocomplete="off"
-        bind:value={app.library.search}
-      /></label
-    >
-    <div class="search-source" aria-label={app.language.t('search.source')}>
-      <span class="source-active">LOCAL</span><button
-        disabled
-        title={app.language.t('common.comingSoon')}>WEB</button
-      >
-    </div>
-  </div>
+  <SearchBox
+    state={app.search}
+    language={app.language}
+    play={(result) => app.run(app.playSearchResult(result))}
+    add={(track) => {
+      if (app.requireLogin()) app.run(app.search.web.add(track));
+    }}
+  />
   <div class="topbar-actions">
     <button
       class="button upload-button desktop-only"

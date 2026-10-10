@@ -5,6 +5,7 @@ import { PlaylistEditorState } from '../features/playlists/editor.svelte';
 import { PlayerState } from '../features/player/state.svelte';
 import { UploadsState } from '../features/uploads/state.svelte';
 import { SpotifyState } from '../features/spotify-import/state.svelte';
+import { SearchState, type LocalResult } from '../features/search/state.svelte';
 import { LanguageState } from '../shared/i18n/state.svelte';
 import { ThemeState } from '../shared/theme/state.svelte';
 import { MenuState } from '../shared/ui/menu.svelte';
@@ -35,6 +36,14 @@ export class Application {
     (message) => this.notify(message),
   );
   readonly spotify = new SpotifyState((id) => this.refresh(id));
+  readonly search = new SearchState(
+    () => ({
+      items: this.library.items,
+      selected: this.library.selected,
+      canSearchWeb: !!this.auth.user,
+    }),
+    () => this.refresh(),
+  );
   readonly editor = new PlaylistEditorState(
     (id) => {
       this.library.shareLinks.delete(id);
@@ -132,11 +141,17 @@ export class Application {
   async start(): Promise<void> {
     await this.openSession();
   }
-  async selectPlaylist(id: string, token: string | null = null): Promise<void> {
+  async selectPlaylist(
+    id: string,
+    token: string | null = null,
+    showPlaylist = true,
+  ): Promise<void> {
+    if (showPlaylist) this.search.close();
     this.menu.close(false);
     this.libraryOpen = false;
     if (await this.library.select(id, token)) {
       const selected = this.library.selected!;
+      this.player.engine.updateMetadata(selected.tracks);
       selectNavigation(selected.id, token);
       if (this.player.cover?.id === selected.id) this.player.cover = selected;
     }
@@ -148,13 +163,23 @@ export class Application {
     await this.library.list();
     const candidate = id ?? this.library.selected?.id ?? user.default_playlist_id;
     if (!id && this.library.shareToken)
-      await this.selectPlaylist(candidate, this.library.shareToken);
+      await this.selectPlaylist(candidate, this.library.shareToken, false);
     else
       await this.selectPlaylist(
         this.library.items.some((item) => item.id === candidate)
           ? candidate
           : user.default_playlist_id,
+        null,
+        false,
       );
+  }
+
+  async playSearchResult(result: LocalResult): Promise<void> {
+    this.search.remember({ kind: 'local', result });
+    await this.selectPlaylist(result.playlistId);
+    if (this.library.selected?.id !== result.playlistId) return;
+    const track = this.library.selected?.tracks.find((item) => item.id === result.track.id);
+    if (track) this.play(track);
   }
   play(track: Track): void {
     if (
@@ -248,6 +273,8 @@ export class Application {
       await this.uploads.poll();
       if (version !== this.sessionVersion || this.disposed) return;
       await this.library.poll();
+      if (version !== this.sessionVersion || this.disposed) return;
+      if (this.library.selected) this.player.engine.updateMetadata(this.library.selected.tracks);
     } catch (error) {
       if (version !== this.sessionVersion || this.disposed) return;
       if (error instanceof ApiError && error.status === 401) {
@@ -268,6 +295,7 @@ export class Application {
     this.player.engine.stop();
     this.uploads.reset();
     this.spotify.reset();
+    this.search.reset();
     this.editor.reset();
     this.auth.reset();
     this.library.reset();
@@ -280,6 +308,7 @@ export class Application {
     this.player.dispose();
     this.uploads.reset();
     this.spotify.reset();
+    this.search.reset();
     this.editor.reset();
   }
 }

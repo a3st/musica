@@ -66,7 +66,7 @@ pub fn lockForDeletion(
 ) !tracks_model.Files {
     const query =
         \\SELECT json_build_object('bucket', storage_bucket, 'key', object_key, 'prefix', hls_prefix,
-        \\    'hls_bucket', hls_bucket, 'segments', hls_segment_count)::text
+        \\    'hls_bucket', hls_bucket, 'segments', hls_segment_count, 'artwork_key', artwork_key)::text
         \\FROM musica.tracks
         \\WHERE id = $1
         \\AND owner_id = $2
@@ -136,4 +136,55 @@ pub fn lock(conn: *database.Connection, arena: std.mem.Allocator, id: []const u8
     const query = "SELECT id::text FROM musica.tracks WHERE id = $1 FOR UPDATE";
 
     _ = (try conn.queryText(arena, query, .{id})) orelse return error.TrackNotFound;
+}
+
+/// Публикует метаданные только для того исходника, который обрабатывала задача.
+pub fn setMetadata(
+    conn: *database.Connection,
+    payload: tracks_model.MetadataPayload,
+    metadata: tracks_model.Metadata,
+) !void {
+    const query =
+        \\UPDATE musica.tracks
+        \\SET duration_seconds = $4, artwork_key = $5
+        \\WHERE id = $1 AND storage_bucket = $2 AND object_key = $3
+        \\AND status IN ('ready', 'streamed')
+    ;
+
+    if (try conn.exec(query, .{
+        payload.track_id,
+        payload.bucket,
+        payload.key,
+        metadata.duration_seconds,
+        metadata.artwork_key,
+    }) != 1)
+        return error.TrackNotFound;
+}
+
+/// Возвращает расположение обложки после проверки владения, членства, публичности или ссылки.
+/// Отсутствие обложки и отсутствие доступа одинаково возвращают NotFound.
+pub fn readArtwork(
+    conn: *database.Connection,
+    arena: std.mem.Allocator,
+    id: []const u8,
+    user: ?[]const u8,
+    share_hash: ?[]const u8,
+) !tracks_model.UploadLocation {
+    const query =
+        \\SELECT json_build_object('bucket', t.storage_bucket, 'key', t.artwork_key)::text
+        \\FROM musica.tracks t
+        \\WHERE t.id = $1 AND t.owner_id IS NOT NULL AND t.artwork_key IS NOT NULL
+        \\AND (t.owner_id = $2::uuid OR EXISTS (
+        \\    SELECT 1 FROM musica.track_playlists tp
+        \\    JOIN musica.playlists p ON p.id = tp.playlist_id
+        \\    WHERE tp.track_id = t.id AND p.owner_id IS NOT NULL
+        \\    AND (p.visibility = 'public' OR p.owner_id = $2::uuid
+        \\        OR EXISTS (SELECT 1 FROM musica.playlist_members m
+        \\            WHERE m.playlist_id = p.id AND m.user_id = $2::uuid)
+        \\        OR (p.visibility = 'unlisted' AND p.share_token_hash = $3))))
+    ;
+
+    const body = (try conn.queryText(arena, query, .{ id, user, share_hash })) orelse return error.NotFound;
+
+    return std.json.parseFromSliceLeaky(tracks_model.UploadLocation, arena, body, .{}) catch error.DatabaseUnavailable;
 }

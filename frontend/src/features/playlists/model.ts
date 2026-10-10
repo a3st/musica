@@ -1,4 +1,12 @@
-import { record, text, uuid, nullableText, bool, choice } from '../../shared/api/validation';
+import {
+  record,
+  text,
+  uuid,
+  nullableText,
+  bool,
+  choice,
+  nullableNonNegativeInteger,
+} from '../../shared/api/validation';
 import { t } from '../../shared/i18n';
 import { track, type Track } from '../tracks/model';
 export interface PlaylistSummary {
@@ -12,6 +20,8 @@ export interface PlaylistSummary {
   image_key: string | null;
   role: 'owner' | 'editor' | 'viewer';
   track_count: number;
+  duration_seconds?: number | null;
+  duration_complete?: boolean;
 }
 
 export interface Playlist {
@@ -24,6 +34,8 @@ export interface Playlist {
   is_default: boolean;
   image_key: string | null;
   tracks: Track[];
+  duration_seconds?: number | null;
+  duration_complete?: boolean;
 }
 
 export function metadata(data: unknown) {
@@ -38,6 +50,8 @@ export function metadata(data: unknown) {
     visibility: choice(r.visibility, ['private', 'public', 'unlisted'] as const),
     is_default: bool(r.is_default),
     image_key: nullableText(r.image_key),
+    duration_seconds: nullableNonNegativeInteger(r.duration_seconds ?? null),
+    duration_complete: r.duration_complete === undefined ? false : bool(r.duration_complete),
   };
 }
 

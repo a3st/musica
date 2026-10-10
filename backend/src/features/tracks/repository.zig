@@ -13,3 +13,7 @@ pub const finishUpload = impl.finishUpload;
 pub const lock = impl.lock;
 
 pub const lockOwner = impl.lockOwner;
+
+pub const setMetadata = impl.setMetadata;
+
+pub const readArtwork = impl.readArtwork;

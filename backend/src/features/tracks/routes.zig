@@ -4,13 +4,35 @@ const App = @import("../../app.zig").App;
 const model = @import("model.zig");
 const service = @import("service.zig");
 const auth_service = @import("../auth/service.zig");
+const auth_model = @import("../auth/model.zig");
 const api = @import("../../helpers/api.zig");
 
-/// Регистрирует маршруты создания, загрузки файла и удаления трека.
+/// Регистрирует маршруты создания, загрузки файла, чтения обложки и удаления трека.
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/tracks", create, .{});
     router.put("/api/tracks/:id/file", upload, .{});
     router.delete("/api/tracks/:id", remove, .{});
+    router.get("/api/tracks/:id/artwork", artwork, .{});
+}
+
+/// Выдаёт JPEG с проверкой доступа через сессию или share_token; приватные ответы не кешируются.
+fn artwork(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const id = req.param("id") orelse return api.failure(res, error.InvalidTrackId);
+    if (!model.isValidId(id)) return api.failure(res, error.InvalidTrackId);
+
+    const query = req.query() catch return api.failure(res, error.InvalidInput);
+    const token = query.get("share_token");
+    if (token) |value| {
+        if (!auth_model.isValidToken(value)) return api.failure(res, error.NotFound);
+    }
+    const user = auth_service.optionalUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const hash = if (token) |value| auth_model.tokenHash(value) else null;
+
+    res.body = service.readArtwork(app, res.arena, id, user, if (hash) |*value| value else null) catch |err|
+        return api.failure(res, err);
+    res.header("Content-Type", "image/jpeg");
+    res.header("Cache-Control", "no-store");
+    res.header("X-Content-Type-Options", "nosniff");
 }
 
 /// Удаляет трек через сервис и планирует очистку файлов; возвращает 204.
@@ -73,7 +95,8 @@ fn upload(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 test "POST rejects malformed JSON, missing fields and invalid metadata before DB access" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 3 };
+    var app: App = undefined;
+    app.max_upload_bytes = 3;
     const bodies = [_][]const u8{
         "not json",
         "{\"playlist_ids\":null,\"title\":\"Track\",\"artist\":\"Artist\"}",
@@ -95,7 +118,8 @@ test "POST rejects malformed JSON, missing fields and invalid metadata before DB
 }
 
 test "PUT rejects invalid ID, empty file, unsupported MIME and oversize body" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 3 };
+    var app: App = undefined;
+    app.max_upload_bytes = 3;
     const Case = struct {
         id: ?[]const u8 = "11111111-1111-4111-8111-111111111111",
         mime: []const u8 = "audio/mpeg",
@@ -130,7 +154,8 @@ test "PUT rejects invalid ID, empty file, unsupported MIME and oversize body" {
 }
 
 test "valid track creation and upload require a session" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
     var creation = httpz.testing.init(.{});
     defer creation.deinit();
     creation.header("content-type", "application/json");
@@ -150,7 +175,8 @@ test "valid track creation and upload require a session" {
 }
 
 test "shared API helpers preserve track error codes and the 16 KiB JSON limit" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
     const Case = struct { body: []const u8, status: u16 = 400, code: []const u8 };
 
     const cases = [_]Case{

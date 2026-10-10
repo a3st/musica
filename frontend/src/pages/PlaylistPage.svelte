@@ -68,6 +68,7 @@
 </div>
 <TrackTable
   {tracks}
+  shareToken={app.library.shareToken}
   currentId={app.player.value.current?.id ?? null}
   paused={app.player.value.paused}
   loading={app.player.value.loading}

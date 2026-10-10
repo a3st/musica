@@ -3,6 +3,21 @@ const database = @import("../database.zig");
 const web_int_model = @import("../../features/web_int/model.zig");
 const tracks_model = @import("../../features/tracks/model.zig");
 
+/// Возвращает JSON результата поиска, пока срок кеша не истёк.
+pub fn readSearchCache(conn: *database.Connection, arena: std.mem.Allocator, key: []const u8) !?[]const u8 {
+    return conn.queryText(arena, "SELECT body FROM musica.catalog_cache WHERE key = $1 AND expires_at > clock_timestamp()", .{key});
+}
+
+/// Обновляет общий кеш поиска на десять минут; устаревшие записи удаляются при записи.
+pub fn writeSearchCache(conn: *database.Connection, key: []const u8, body: []const u8) !void {
+    _ = try conn.exec("DELETE FROM musica.catalog_cache WHERE expires_at <= clock_timestamp()", .{});
+    _ = try conn.exec(
+        \\INSERT INTO musica.catalog_cache (key, body, expires_at)
+        \\VALUES ($1, $2, clock_timestamp() + interval '10 minutes')
+        \\ON CONFLICT (key) DO UPDATE SET body = EXCLUDED.body, expires_at = EXCLUDED.expires_at
+    , .{ key, body });
+}
+
 /// Возвращает существующий общий трек или создаёт его у сервисной учётки.
 /// Дедупликация по источнику и полному названию выполняется с блокировками в транзакции.
 pub fn getOrCreateTrack(

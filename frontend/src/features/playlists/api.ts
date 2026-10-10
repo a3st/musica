@@ -18,8 +18,14 @@ export const playlistsApi = {
       };
     });
   },
-  async playlist(id: string): Promise<Playlist> {
-    return playlist(await request('/playlists/' + id));
+  async playlist(id: string, signal?: AbortSignal): Promise<Playlist> {
+    return playlist(
+      await request('/playlists/' + id, {
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(30000)])
+          : AbortSignal.timeout(30000),
+      }),
+    );
   },
   async sharedPlaylist(token: string): Promise<Playlist> {
     return playlist(await request('/shared/playlists/' + encodeURIComponent(token)));

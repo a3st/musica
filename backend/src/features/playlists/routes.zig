@@ -253,7 +253,8 @@ fn setImage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 test "playlist creation and updates require a session" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
 
     const Action = *const fn (*App, *httpz.Request, *httpz.Response) anyerror!void;
     for ([_]Action{ create, update }) |action| {
@@ -272,7 +273,8 @@ test "playlist creation and updates require a session" {
 }
 
 test "image validation preserves HTTP errors before authorization or storage" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 64 * 1024 * 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 64 * 1024 * 1024;
     const oversized = try std.testing.allocator.alloc(u8, 5 * 1024 * 1024 + 1);
     defer std.testing.allocator.free(oversized);
     @memset(oversized, 'a');
@@ -305,7 +307,8 @@ test "image validation preserves HTTP errors before authorization or storage" {
 }
 
 test "missing or malformed share tokens return not_found without DB access" {
-    var app: App = .{ .db = undefined, .storage = undefined, .max_upload_bytes = 1024 };
+    var app: App = undefined;
+    app.max_upload_bytes = 1024;
     for ([_]?[]const u8{ null, "bad-token" }) |token| {
         var context = httpz.testing.init(.{});
         defer context.deinit();

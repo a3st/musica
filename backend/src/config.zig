@@ -8,8 +8,13 @@ pub const Config = struct {
     database: database.Settings,
     s3: s3.Settings,
 
+    /// Максимальный размер тела запроса и загружаемого файла в байтах.
     max_upload_bytes: usize,
     ffmpeg_path: []const u8,
+    ffprobe_path: []const u8,
+    metadata_tmp_dir: []const u8,
+    metadata_worker_enabled: bool,
+    metadata_timeout_seconds: u32,
     ytdlp_path: []const u8,
 
     spotify_tmp_dir: []const u8,
@@ -25,14 +30,12 @@ pub const Config = struct {
     bootstrap_admin_username: ?[]const u8,
     bootstrap_admin_password: ?[]const u8,
 
+    /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
     shared_track_retention_seconds: u32,
 
     /// Читает окружение, подставляет значения по умолчанию и проверяет ограничения.
     /// Учётные данные стартового администратора должны быть заданы вместе; пустая пара отключает создание.
     pub fn load(env: *const std.process.Environ.Map) !Config {
-        const admin_username = env.get("BOOTSTRAP_ADMIN_USERNAME") orelse "";
-        const admin_password = env.get("BOOTSTRAP_ADMIN_PASSWORD") orelse "";
-
         const config: Config = .{
             .http_address = try loadHttpAddress(env),
             .database = try database.Settings.load(env),
@@ -40,6 +43,10 @@ pub const Config = struct {
 
             .max_upload_bytes = try std.fmt.parseInt(usize, env.get("MAX_UPLOAD_BYTES") orelse "67108864", 10),
             .ffmpeg_path = env.get("FFMPEG_PATH") orelse "ffmpeg",
+            .ffprobe_path = env.get("FFPROBE_PATH") orelse "ffprobe",
+            .metadata_tmp_dir = env.get("TRACK_METADATA_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-metadata",
+            .metadata_worker_enabled = try parseBoolean(env.get("TRACK_METADATA_WORKER_ENABLED") orelse "true"),
+            .metadata_timeout_seconds = try std.fmt.parseInt(u32, env.get("TRACK_METADATA_TIMEOUT_SECONDS") orelse "120", 10),
             .ytdlp_path = env.get("YTDLP_PATH") orelse "yt-dlp",
 
             .spotify_tmp_dir = env.get("SPOTIFY_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-spotify",
@@ -52,8 +59,8 @@ pub const Config = struct {
 
             .cookie_secure = try parseBoolean(env.get("AUTH_COOKIE_SECURE") orelse "false"),
             .registration_enabled = try parseBoolean(env.get("REGISTRATION_ENABLED") orelse "false"),
-            .bootstrap_admin_username = if (admin_username.len > 0) admin_username else null,
-            .bootstrap_admin_password = if (admin_password.len > 0) admin_password else null,
+            .bootstrap_admin_username = loadOptionalString(env, "BOOTSTRAP_ADMIN_USERNAME"),
+            .bootstrap_admin_password = loadOptionalString(env, "BOOTSTRAP_ADMIN_PASSWORD"),
 
             .shared_track_retention_seconds = try std.fmt.parseInt(
                 u32,
@@ -76,9 +83,20 @@ pub const Config = struct {
             config.hls_timeout_seconds == 0 or config.hls_timeout_seconds > 3600)
             return error.InvalidConfiguration;
 
+        if (config.ffprobe_path.len == 0 or config.metadata_tmp_dir.len == 0 or
+            config.metadata_timeout_seconds == 0 or config.metadata_timeout_seconds > 3600)
+            return error.InvalidConfiguration;
+
         return config;
     }
 };
+
+/// Возвращает непустое значение окружения; отсутствие или пустая строка означают null.
+fn loadOptionalString(env: *const std.process.Environ.Map, name: []const u8) ?[]const u8 {
+    const value = env.get(name) orelse return null;
+
+    return if (value.len > 0) value else null;
+}
 
 /// Принимает только строки "true" и "false"; иначе InvalidConfiguration.
 fn parseBoolean(value: []const u8) !bool {
@@ -109,7 +127,14 @@ test "bootstrap admin accepts an empty pair and rejects incomplete credentials" 
     try std.testing.expect(absent.bootstrap_admin_username == null);
     try std.testing.expect(absent.bootstrap_admin_password == null);
 
+    try env.put("BOOTSTRAP_ADMIN_USERNAME", "fixture_admin");
+    try std.testing.expectError(error.InvalidConfiguration, Config.load(&env));
+
     try env.put("BOOTSTRAP_ADMIN_USERNAME", "");
+    const empty_username = try Config.load(&env);
+    try std.testing.expect(empty_username.bootstrap_admin_username == null);
+    try std.testing.expect(empty_username.bootstrap_admin_password == null);
+
     try env.put("BOOTSTRAP_ADMIN_PASSWORD", "");
     const empty = try Config.load(&env);
     try std.testing.expect(empty.bootstrap_admin_username == null);

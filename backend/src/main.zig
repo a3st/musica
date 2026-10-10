@@ -4,8 +4,9 @@ const httpz = @import("httpz");
 const Config = @import("config.zig").Config;
 const App = @import("app.zig").App;
 
-const database = @import("infrastructure/database.zig");
+const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
+const ITunesClient = @import("infrastructure/itunes.zig").ITunesClient;
 
 const health_routes = @import("features/health/routes.zig");
 const tracks_routes = @import("features/tracks/routes.zig");
@@ -14,8 +15,10 @@ const auth_routes = @import("features/auth/routes.zig");
 const streaming_routes = @import("features/streaming/routes.zig");
 const streaming_worker = @import("features/streaming/worker.zig");
 const tracks_cleanup_worker = @import("features/tracks/cleanup_worker.zig");
+const tracks_metadata_worker = @import("features/tracks/metadata_worker.zig");
 const spotify_int_routes = @import("features/spotify_int/routes.zig");
 const web_int_worker = @import("features/web_int/worker.zig");
+const web_int_routes = @import("features/web_int/routes.zig");
 const users_service = @import("features/users/service.zig");
 const users_routes = @import("features/users/routes.zig");
 const web_int_cleanup_worker = @import("features/web_int/cleanup_worker.zig");
@@ -26,11 +29,15 @@ pub fn main(init: std.process.Init) !void {
     const config = try Config.load(init.environ_map);
 
     var app: App = .{
-        .db = try database.Database.init(init.io, init.gpa, config.database),
+        .db = try Database.init(init.io, init.gpa, config.database),
         .storage = S3.init(init.io, init.gpa, config.s3),
+        .catalog = ITunesClient.init(init.io, init.gpa),
 
         .max_upload_bytes = config.max_upload_bytes,
         .ffmpeg_path = config.ffmpeg_path,
+        .ffprobe_path = config.ffprobe_path,
+        .metadata_tmp_dir = config.metadata_tmp_dir,
+        .metadata_timeout_seconds = config.metadata_timeout_seconds,
         .ytdlp_path = config.ytdlp_path,
 
         .spotify_tmp_dir = config.spotify_tmp_dir,
@@ -46,6 +53,7 @@ pub fn main(init: std.process.Init) !void {
     };
     defer app.db.deinit();
     defer app.storage.deinit();
+    defer app.catalog.deinit();
 
     {
         var arena = std.heap.ArenaAllocator.init(init.gpa);
@@ -79,6 +87,7 @@ pub fn main(init: std.process.Init) !void {
     users_routes.register(router);
     streaming_routes.register(router);
     spotify_int_routes.register(router);
+    web_int_routes.register(router);
 
     var web_int_future: ?std.Io.Future(anyerror!void) = if (config.spotify_worker_enabled)
         try init.io.concurrent(web_int_worker.run, .{&app})
@@ -92,10 +101,16 @@ pub fn main(init: std.process.Init) !void {
         null;
     defer if (hls_future) |*future| future.cancel(init.io) catch {};
 
-    var cleanup_future: std.Io.Future(anyerror!void) = try init.io.concurrent(tracks_cleanup_worker.run, .{&app});
-    defer cleanup_future.cancel(init.io) catch {};
+    var tracks_cleanup_future: std.Io.Future(anyerror!void) = try init.io.concurrent(tracks_cleanup_worker.run, .{&app});
+    defer tracks_cleanup_future.cancel(init.io) catch {};
 
-    var unused_future = try init.io.concurrent(web_int_cleanup_worker.run, .{&app});
+    var metadata_future: ?std.Io.Future(anyerror!void) = if (config.metadata_worker_enabled)
+        try init.io.concurrent(tracks_metadata_worker.run, .{&app})
+    else
+        null;
+    defer if (metadata_future) |*future| future.cancel(init.io) catch {};
+
+    var unused_future: std.Io.Future(anyerror!void) = try init.io.concurrent(web_int_cleanup_worker.run, .{&app});
     defer unused_future.cancel(init.io) catch {};
 
     std.log.info("Musica API listening on {f}", .{config.http_address});
@@ -104,6 +119,9 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("features/tracks/metadata_worker.zig");
+    _ = @import("features/web_int/routes.zig");
+    _ = @import("infrastructure/itunes.zig");
     _ = @import("features/spotify_int/model.zig");
     _ = @import("features/spotify_int/routes.zig");
     _ = @import("features/web_int/worker.zig");

@@ -49,6 +49,10 @@ pub fn remove(
 
     _ = try cleanup_service.enqueue(conn, arena, location.bucket, &.{location.key}, 0);
 
+    if (location.artwork_key) |artwork_key| {
+        _ = try cleanup_service.enqueue(conn, arena, location.bucket, &.{artwork_key}, 0);
+    }
+
     if (location.prefix) |prefix| {
         var keys: std.ArrayList([]const u8) = .empty;
 
@@ -65,6 +69,7 @@ pub fn remove(
     try jobs_repository.removeByKey(conn, streaming_model.preparation_job_kind, key);
     try jobs_repository.removeByKey(conn, model.upload_job_kind, key);
     try jobs_repository.removeByKey(conn, web_int_model.download_job_kind, key);
+    try jobs_repository.removeByKey(conn, model.metadata_job_kind, key);
 
     try repository.remove(conn, key);
 }

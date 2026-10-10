@@ -7,3 +7,7 @@ pub const readTrackStatus = impl.readTrackStatus;
 pub const lockForCleanup = impl.lockForCleanup;
 
 pub const listCleanupCandidates = impl.listCleanupCandidates;
+
+pub const readSearchCache = impl.readSearchCache;
+
+pub const writeSearchCache = impl.writeSearchCache;

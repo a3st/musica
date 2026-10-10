@@ -19,7 +19,7 @@ export class PlayerState {
   constructor(
     notify: (message: string) => void,
     userId: () => string | null,
-    shareToken: (id: string) => string | null,
+    readonly shareToken: (id: string) => string | null,
   ) {
     this.engine = new PlayerEngine(
       () => {

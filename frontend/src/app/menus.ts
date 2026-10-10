@@ -79,6 +79,7 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
   const playlist = app.library.selected;
   if (!playlist) return [];
   const { t } = app.language;
+  const deletesTrack = playlist.is_default && track.owner_id === app.auth.user?.id;
   const targets = app.library.items.filter(
     (item) => item.role !== 'viewer' && !item.is_default && item.id !== playlist.id,
   );
@@ -115,7 +116,8 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
       icon: 'plus',
       group: 'organize',
       id: 'attach-track',
-      disabled: track.owner_id !== app.auth.user?.id || !targets.length,
+      disabled:
+        !app.auth.user || (!track.shared && track.owner_id !== app.auth.user.id) || !targets.length,
       children: targets.map((target) => ({
         label: target.title,
         icon: 'library',
@@ -131,7 +133,7 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
       })),
     },
     {
-      label: playlist.is_default ? t('tracks.deleteFromLibrary') : t('tracks.removeFromPlaylist'),
+      label: deletesTrack ? t('tracks.deleteFromLibrary') : t('tracks.removeFromPlaylist'),
       icon: 'trash',
       group: 'danger',
       id: 'remove-track',
@@ -139,10 +141,13 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
       disabled: !app.library.writable(playlist.id),
       action: () => {
         app.confirmation = {
-          title: playlist.is_default ? t('tracks.deleteTitle') : t('tracks.removeTitle'),
-          description: playlist.is_default
-            ? t('tracks.deleteDescription', { title: track.title })
-            : t('tracks.removeDescription', { title: track.title }),
+          title: deletesTrack ? t('tracks.deleteTitle') : t('tracks.removeTitle'),
+          description:
+            playlist.is_default && track.shared
+              ? t('tracks.removeSharedDescription', { title: track.title })
+              : deletesTrack
+                ? t('tracks.deleteDescription', { title: track.title })
+                : t('tracks.removeDescription', { title: track.title }),
           remove: async () => {
             if (playlist.is_default) {
               await tracksApi.removeTrack(track.id);
@@ -150,9 +155,7 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
             } else await playlistsApi.detachTrack(playlist.id, track.id);
             await app.refresh();
             app.notify(
-              playlist.is_default
-                ? t('tracks.deletedFromLibrary')
-                : t('tracks.removedFromPlaylist'),
+              deletesTrack ? t('tracks.deletedFromLibrary') : t('tracks.removedFromPlaylist'),
             );
           },
         };

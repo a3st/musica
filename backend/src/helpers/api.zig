@@ -64,6 +64,7 @@ fn respondFailure(res: *httpz.Response, err: anyerror) !void {
         error.DatabaseUnavailable => 503,
         error.StorageTimeout => 504,
         error.StorageUnavailable => 502,
+        error.CatalogUnavailable => 503,
         else => return err,
     };
 
@@ -87,6 +88,7 @@ fn respondFailure(res: *httpz.Response, err: anyerror) !void {
         error.DatabaseUnavailable => "database_unavailable",
         error.StorageTimeout => "storage_timeout",
         error.StorageUnavailable => "storage_unavailable",
+        error.CatalogUnavailable => "web_search_unavailable",
 
         error.InvalidPlaylistId => "invalid_playlist_id",
         error.InvalidPlaylistIds => "invalid_playlist_ids",

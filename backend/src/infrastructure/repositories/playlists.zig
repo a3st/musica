@@ -11,12 +11,22 @@ const json_playlist =
     \\    'visibility', a.visibility,
     \\    'is_default', a.is_default,
     \\    'image_key', a.image_key,
+    \\    'track_count', (SELECT count(*) FROM musica.track_playlists tp WHERE tp.playlist_id = a.id),
+    \\    'duration_seconds', (
+    \\        SELECT CASE WHEN count(*) = 0 THEN 0 ELSE sum(t.duration_seconds) END
+    \\        FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
+    \\        WHERE tp.playlist_id = a.id),
+    \\    'duration_complete', NOT EXISTS (
+    \\        SELECT 1 FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
+    \\        WHERE tp.playlist_id = a.id AND t.duration_seconds IS NULL),
     \\    'tracks', COALESCE((
     \\        SELECT json_agg(json_build_object(
     \\            'id', t.id,
     \\            'title', t.title,
     \\            'artist', t.artist,
     \\            'status', t.status,
+    \\            'duration_seconds', t.duration_seconds,
+    \\            'artwork_key', t.artwork_key,
     \\            'owner_id', t.owner_id,
     \\            'shared', EXISTS (
     \\                SELECT 1 FROM musica.users u
@@ -44,7 +54,12 @@ pub fn list(conn: *database.Connection, arena: std.mem.Allocator, user: []const 
         \\        END, 'track_count', (
         \\            SELECT count(*)
         \\            FROM musica.track_playlists tp
-        \\            WHERE tp.playlist_id = a.id)) AS item
+        \\            WHERE tp.playlist_id = a.id), 'duration_seconds', (
+        \\            SELECT CASE WHEN count(*) = 0 THEN 0 ELSE sum(t.duration_seconds) END
+        \\            FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
+        \\            WHERE tp.playlist_id = a.id), 'duration_complete', NOT EXISTS (
+        \\            SELECT 1 FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
+        \\            WHERE tp.playlist_id = a.id AND t.duration_seconds IS NULL)) AS item
         \\    FROM musica.playlists a
         \\    LEFT JOIN musica.playlist_members m
         \\    ON m.playlist_id = a.id
