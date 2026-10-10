@@ -14,6 +14,10 @@ const converted = spawnSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=f
   '-c:a', 'aac', '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod', '-hls_segment_filename',
   join(temporary, 'segment-%06d.ts'), join(temporary, 'index.m3u8')]);
 assert.equal(converted.status, 0, `FFmpeg required for playback checks: ${converted.error || converted.stderr}`);
+const updatedImage = spawnSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=16x16',
+  '-frames:v', '1', join(temporary, 'updated-cover.png')]);
+assert.equal(updatedImage.status, 0, 'FFmpeg generates a distinct replacement cover');
+const updatedImageBytes = readFileSync(join(temporary, 'updated-cover.png'));
 const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const executablePath = process.env.CHROMIUM_PATH || (existsSync(edge) ? edge : undefined);
 const browser = await chromium.launch({ executablePath, headless: true });
@@ -44,6 +48,8 @@ let meHeld;
 let verifyPlaybackCookie = false;
 const playbackCookies = [];
 const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1sAAAAASUVORK5CYII=', 'base64');
+const playlistImages = new Map();
+let imageVersion = 0;
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
 await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
 const page = await context.newPage();
@@ -100,9 +106,10 @@ await page.route('**/api/**', async (route) => {
   }
   let match = path.match(/^\/api\/playlists\/([^/]+)\/image$/);
   if (match) {
-    if (method === 'GET') return route.fulfill({ contentType: 'image/png', body: imageBytes });
+    if (method === 'GET') return route.fulfill({ contentType: 'image/png', body: playlistImages.get(match[1]) ?? imageBytes });
     if (failImage) { failImage = false; return json({ error: 'internal_error' }, 500); }
-    const p = playlists.find(p => p.id === match[1]); p.image_key = `playlists/${p.id}/cover`;
+    const p = playlists.find(p => p.id === match[1]); p.image_key = `playlists/${p.id}/cover-${++imageVersion}`;
+    playlistImages.set(p.id, request.postDataBuffer());
     return json({ image_key: p.image_key, bucket: 'uploads' });
   }
   match = path.match(/^\/api\/playlists\/([^/]+)$/);
@@ -111,7 +118,9 @@ await page.route('**/api/**', async (route) => {
 
   if (match && method === 'GET') {
     if (expireLibrary) return json({ error: 'unauthorized' }, 401);
-    return json({ ...playlists.find((p) => p.id === match[1]), tracks: members.get(match[1]) });
+    const p = playlists.find((p) => p.id === match[1]);
+    if (!authenticated && p.visibility !== 'public') return json({ error: 'unauthorized' }, 401);
+    return json({ ...p, tracks: members.get(match[1]) });
   }
   match = path.match(/^\/api\/playlists\/([^/]+)\/tracks\/([^/]+)$/);
   if (match) {
@@ -336,6 +345,11 @@ try {
   await page.waitForFunction(() => document.querySelector('#elapsed').textContent !== '0:00');
   await page.locator('#player-play').click(); await page.locator('#player-play[aria-label="Воспроизвести"]').waitFor();
   const seek = page.locator('#player-seek');
+  await seek.fill('500');
+  await page.waitForFunction(() => {
+    const input = document.querySelector('#player-seek');
+    return Math.abs(Number(input.value) - 500) < 2;
+  });
   await seek.evaluate(input => input.blur());
   await page.mouse.move(0, 0);
   await page.waitForTimeout(200);
@@ -344,14 +358,14 @@ try {
     const position = 4.5 + (rect.width - 9) * Number(input.value) / Number(input.max);
     return { x: Math.floor(rect.x + position - 7), y: Math.floor(rect.y - 7), width: 14, height: 18 };
   });
-  const thumbHidden = await page.screenshot({ clip: seekThumb });
+  const thumbHidden = await page.screenshot({ clip: seekThumb, animations: 'disabled' });
   await seek.hover();
   await page.waitForTimeout(200);
-  const thumbHovered = await page.screenshot({ clip: seekThumb });
+  const thumbHovered = await page.screenshot({ clip: seekThumb, animations: 'disabled' });
   assert.equal(thumbHidden.equals(thumbHovered), false, 'seek thumb becomes visible on hover');
   await page.mouse.move(0, 0);
   await page.waitForTimeout(200);
-  assert.equal(thumbHidden.equals(await page.screenshot({ clip: seekThumb })), true, 'seek thumb disappears when the pointer leaves');
+  assert.equal(thumbHidden.equals(await page.screenshot({ clip: seekThumb, animations: 'disabled' })), true, 'seek thumb disappears when the pointer leaves');
   await page.locator('#player-play').hover();
   assert.equal(await page.locator('#player-play').evaluate((button) => getComputedStyle(button).backgroundColor), 'rgb(248, 249, 255)', 'player button keeps its contrast on hover');
   await page.screenshot({ path: '../backend/.zig-cache/ui-desktop.png' });
@@ -424,12 +438,36 @@ try {
   const created = playlists.find(p => p.title === 'Новый плейлист');
   assert.ok(created.image_key, 'artwork uploads after playlist creation');
   assert.ok(mutations.some(m => m.method === 'PUT' && m.path === `/api/playlists/${created.id}/image`));
+  members.set(created.id, [tracks.find(track => track.id === id(11))]);
+  assert.equal(new URL(page.url()).searchParams.get('playlist'), created.id);
+  await page.reload(); await page.getByRole('heading', { name: created.title, exact: true }).waitFor();
+  assert.equal(await page.locator('.sidebar [aria-current=page]').getAttribute('data-playlist'), created.id, 'reload restores the selected playlist instead of Uploads');
+  await page.locator(`[data-play="${id(11)}"]`).click();
+  await page.locator('#player-play[aria-label="Пауза"]').waitFor();
+  const originalImageKey = created.image_key;
   await page.locator(`.sidebar [data-playlist="${created.id}"]`).click({ button: 'right' });
   await page.locator('#edit-playlist').click(); await page.locator('#playlist-dialog[open]').waitFor();
   await page.locator('#playlist-form [name=title]').fill('Updated mix');
   await page.locator('#playlist-form [name=description]').fill('New description');
   await page.locator('#playlist-form [name=visibility]').selectOption('public');
+  await page.locator('#playlist-image-input').setInputFiles({ name: 'updated.png', mimeType: 'image/png', buffer: updatedImageBytes });
   await page.locator('#playlist-save').click(); await page.getByRole('heading', { name: 'Updated mix', exact: true }).waitFor();
+  assert.notEqual(created.image_key, originalImageKey);
+  const coverSelectors = ['.hero-cover img', `.sidebar [data-playlist="${created.id}"] img`, '#now-art img'];
+  for (const selector of coverSelectors) {
+    await page.waitForFunction(selector => {
+      const image = document.querySelector(selector);
+      return image?.complete && image.naturalWidth === 16;
+    }, selector);
+    const cover = page.locator(selector);
+    assert.equal(new URL(await cover.getAttribute('src'), base).searchParams.get('v'), created.image_key, 'cover URL follows its new storage key without a page reload');
+    const pixel = await cover.evaluate(image => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0, 1, 1);
+      return [...context.getImageData(0, 0, 1, 1).data];
+    });
+    assert.ok(pixel[2] > 200 && pixel[0] < 20, 'replacement artwork is rendered in the playlist, sidebar and player');
+  }
   assert.equal(created.description, 'New description'); assert.equal(created.visibility, 'public'); assert.deepEqual(created.tags, ['ambient']);
   await page.locator(`.sidebar [data-playlist="${created.id}"]`).click({ button: 'right' });
   await page.locator('#delete-playlist').click();
@@ -459,7 +497,8 @@ try {
   await page.locator('#spotify-retry').click(); await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
   assert.equal(mutations.filter((m) => m.path === '/api/spotify/import').length, 1);
   await page.locator('#spotify-dialog [data-close]').click();
-  await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  const selectedBeforeReload = await page.locator('h1').textContent();
+  await page.reload(); await page.getByRole('heading', { name: selectedBeforeReload, exact: true }).waitFor();
   await openSpotify();
   await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
   await page.locator('#spotify-dialog [data-close]').click();

@@ -225,7 +225,7 @@ backend запускается с UID/GID `10001`. Архив Zig проверя
 [официального индекса](https://ziglang.org/download/index.json).
 Миграции не запускаются автоматически и не подключены к init-скриптам PostgreSQL.
 
-Образ MinIO также собирается локально: [Dockerfile](docker/minio/Dockerfile)
+Образ MinIO также собирается локально: [Dockerfile](../docker/minio/Dockerfile)
 использует официальные исходники MinIO `RELEASE.2025-09-07T16-13-09Z` и
 `mc` `RELEASE.2025-08-13T08-35-41Z`, проверяя точные коммиты.
 Это позволяет запускать Compose без недоступных готовых образов MinIO.

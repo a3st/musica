@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
   import type { Playlist } from '../model';
+  import { playlistImageUrl } from '../image';
   let {
     playlist,
     mini = false,
@@ -21,7 +22,7 @@
 
 {#if playlist.image_key && canReadImage && !failed}
   <img
-    src={`/api/playlists/${playlist.id}/image`}
+    src={playlistImageUrl(playlist)}
     alt=""
     loading={mini ? 'lazy' : 'eager'}
     onerror={() => {

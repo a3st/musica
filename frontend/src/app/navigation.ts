@@ -7,10 +7,9 @@ export function readNavigation(): { id: string | null; token: string | null } {
 }
 export function selectNavigation(id: string, token: string | null): void {
   const url = new URL(location.href);
-  const publicLink = url.searchParams.get('playlist') === id;
   url.search = '';
   url.hash = '';
   if (token) url.hash = 'share=' + token;
-  else if (publicLink) url.searchParams.set('playlist', id);
+  else url.searchParams.set('playlist', id);
   history.replaceState(null, '', url);
 }

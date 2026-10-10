@@ -23,7 +23,7 @@ services:
 
   minio:
     build:
-      context: ./backend/docker/minio
+      context: ./docker/minio
       dockerfile: Dockerfile
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]

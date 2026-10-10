@@ -2,6 +2,7 @@ import { playlistsApi } from './api';
 import { errorMessage } from '../../shared/api/errors';
 import { t } from '../../shared/i18n';
 import type { Playlist } from './model';
+import { playlistImageUrl } from './image';
 
 export class PlaylistEditorState {
   open = $state(false);
@@ -32,7 +33,7 @@ export class PlaylistEditorState {
     this.tags = playlist?.tags ?? [];
     this.image = null;
     this.error = '';
-    this.existingImage = playlist?.image_key ? `/api/playlists/${playlist.id}/image` : null;
+    this.existingImage = playlist?.image_key ? playlistImageUrl(playlist) : null;
     this.title = playlist?.title ?? '';
     this.description = playlist?.description ?? '';
     this.visibility = playlist?.visibility ?? 'private';

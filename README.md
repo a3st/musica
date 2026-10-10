@@ -26,6 +26,8 @@ backend/              Zig 0.16.0 + http.zig
   migrations/         SQL-миграции для ручного выполнения
   build.zig           Сборка и запуск
   build.zig.zon       Закреплённые зависимости
+docker/               Dockerfile вспомогательных сервисов (MinIO)
+docker-compose.yml    Запуск PostgreSQL, MinIO и backend
 AGENTS.md             Инструкции по работе с кодом
 ```
 

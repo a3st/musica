@@ -139,7 +139,11 @@ export class Application {
   async selectPlaylist(id: string, token: string | null = null): Promise<void> {
     this.menu.close(false);
     this.libraryOpen = false;
-    if (await this.library.select(id, token)) selectNavigation(this.library.selected!.id, token);
+    if (await this.library.select(id, token)) {
+      const selected = this.library.selected!;
+      selectNavigation(selected.id, token);
+      if (this.player.cover?.id === selected.id) this.player.cover = selected;
+    }
     this.libraryOpen = false;
   }
   async refresh(id?: string): Promise<void> {
