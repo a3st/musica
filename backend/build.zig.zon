@@ -1,7 +1,7 @@
 .{
     .name = .musica_backend,
     .fingerprint = 0xda4d6f6af967fbc5,
-    .version = "0.1.0",
+    .version = "0.2.0",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .httpz = .{
@@ -13,5 +13,5 @@
             .hash = "pg-0.0.0-Wp_7gTEVBwB8CsFe-rh8enfPHKrfA3oapKLIRoPbKUDx",
         },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "migrations" },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "migrations", "tests" },
 }

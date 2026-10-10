@@ -9,9 +9,16 @@ CREATE TYPE musica.track_status AS ENUM ('pending', 'ready', 'streamed');
 CREATE TABLE musica.users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username TEXT NOT NULL UNIQUE CHECK (username ~ '^[a-z0-9_]{3,64}$'),
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    password_hash TEXT,
+    kind TEXT NOT NULL DEFAULT 'user' CHECK (kind IN ('user', 'system')),
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT users_credentials CHECK (
+        (kind = 'system' AND password_hash IS NULL AND role = 'user')
+        OR (kind = 'user' AND password_hash IS NOT NULL)
+    )
 );
+CREATE UNIQUE INDEX users_system_idx ON musica.users(kind) WHERE kind = 'system';
 
 CREATE TABLE musica.playlists (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,6 +64,17 @@ CREATE TABLE musica.playlist_members (
 );
 CREATE INDEX playlist_members_user_idx ON musica.playlist_members(user_id, playlist_id);
 
+CREATE FUNCTION musica.track_identity(artist TEXT, title TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE STRICT
+SET search_path = pg_catalog AS $$
+    SELECT json_build_array(
+        normalize(lower(btrim(regexp_replace(artist, '\s+', ' ', 'g'))), NFC),
+        normalize(lower(btrim(regexp_replace(
+            regexp_replace(translate(title, '[]', '()'), '\s*([()])\s*', '\1', 'g'),
+            '\s+', ' ', 'g'
+        ))), NFC)
+    )::text;
+$$;
+
 CREATE TABLE musica.tracks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id UUID REFERENCES musica.users(id) ON DELETE RESTRICT,
@@ -72,6 +90,8 @@ CREATE TABLE musica.tracks (
     hls_bucket TEXT,
     hls_prefix TEXT,
     hls_segment_count INTEGER,
+    catalog_key TEXT UNIQUE,
+    orphaned_at TIMESTAMPTZ,
     CONSTRAINT tracks_storage_location CHECK (storage_bucket <> '' AND object_key <> ''),
     CONSTRAINT tracks_upload_state CHECK (
         (status = 'pending' AND content_type IS NULL AND size_bytes IS NULL AND uploaded_at IS NULL)
@@ -86,6 +106,15 @@ CREATE TABLE musica.tracks (
     UNIQUE (storage_bucket, object_key)
 );
 CREATE INDEX tracks_owner_idx ON musica.tracks(owner_id);
+CREATE INDEX tracks_orphaned_idx ON musica.tracks(orphaned_at) WHERE catalog_key IS NOT NULL;
+
+CREATE TABLE musica.track_sources (
+    provider TEXT NOT NULL CHECK (provider IN ('spotify', 'itunes')),
+    external_id TEXT NOT NULL,
+    track_id UUID NOT NULL REFERENCES musica.tracks(id) ON DELETE CASCADE,
+    PRIMARY KEY (provider, external_id)
+);
+CREATE INDEX track_sources_track_idx ON musica.track_sources(track_id);
 
 CREATE TABLE musica.track_playlists (
     track_id UUID NOT NULL REFERENCES musica.tracks(id) ON DELETE CASCADE,
@@ -93,6 +122,33 @@ CREATE TABLE musica.track_playlists (
     PRIMARY KEY (track_id, playlist_id)
 );
 CREATE INDEX track_playlists_playlist_id_idx ON musica.track_playlists(playlist_id, track_id);
+
+CREATE FUNCTION musica.update_track_references() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, musica, public AS $$
+DECLARE
+    target UUID;
+BEGIN
+    target := CASE WHEN TG_OP = 'DELETE' THEN OLD.track_id ELSE NEW.track_id END;
+    UPDATE musica.tracks t
+    SET orphaned_at = CASE WHEN EXISTS (
+        SELECT 1
+        FROM musica.track_playlists tp
+        JOIN musica.playlists p ON p.id = tp.playlist_id
+        JOIN musica.users u ON u.id = p.owner_id
+        WHERE tp.track_id = t.id AND u.kind = 'user'
+    ) THEN NULL ELSE COALESCE(t.orphaned_at, clock_timestamp()) END
+    WHERE t.id = target AND t.catalog_key IS NOT NULL;
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER track_references_changed AFTER INSERT OR DELETE ON musica.track_playlists
+FOR EACH ROW EXECUTE FUNCTION musica.update_track_references();
+
+CREATE TABLE musica.catalog_cache (
+    key TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL
+);
 
 CREATE TABLE public.jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

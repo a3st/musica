@@ -40,7 +40,7 @@ pub fn create(
         create_query,
         .{ input.title, input.artist, user, bucket },
     )) orelse return error.DatabaseUnavailable;
-    if (!tracks_model.validId(id)) return error.DatabaseUnavailable;
+    if (!tracks_model.isValidId(id)) return error.DatabaseUnavailable;
     const result = id[0..36].*;
 
     const link_query =

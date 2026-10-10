@@ -9,18 +9,18 @@ pub const Settings = struct {
     username: []const u8,
     password: []const u8,
 
-    /// Читает PG-переменные окружения и проверяет настройки; PGPASSWORD обязателен.
+    /// Читает DB-переменные окружения и проверяет настройки; DB_PASSWORD обязателен.
     pub fn load(env: *const std.process.Environ.Map) !Settings {
-        const password = env.get("PGPASSWORD") orelse {
-            std.log.err("Missing environment variable: PGPASSWORD", .{});
+        const password = env.get("DB_PASSWORD") orelse {
+            std.log.err("Missing environment variable: DB_PASSWORD", .{});
             return error.MissingConfiguration;
         };
 
         const settings: Settings = .{
-            .host = env.get("PGHOST") orelse "127.0.0.1",
-            .port = try std.fmt.parseInt(u16, env.get("PGPORT") orelse "5432", 10),
-            .name = env.get("PGDATABASE") orelse "musica",
-            .username = env.get("PGUSER") orelse "musica",
+            .host = env.get("DB_HOST") orelse "127.0.0.1",
+            .port = try std.fmt.parseInt(u16, env.get("DB_PORT") orelse "5432", 10),
+            .name = env.get("DB_NAME") orelse "musica",
+            .username = env.get("DB_USER") orelse "musica",
             .password = password,
         };
 

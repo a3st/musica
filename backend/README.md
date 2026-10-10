@@ -179,6 +179,8 @@ Copy-Item .env.docker.example .env
 ```
 
 Compose запускает три сервиса: PostgreSQL 17, MinIO и backend.
+Значения переменных задаются в корневом `.env`: Compose не подставляет значения
+по умолчанию. Все используемые переменные перечислены в `.env.docker.example`.
 PostgreSQL и MinIO хранят данные в именованных volumes. Порты опубликованы
 на `127.0.0.1`: backend `8080`, S3 API `9000`, консоль MinIO `9001`.
 PostgreSQL доступен внутри сети Compose; для SQL используйте `docker compose exec`.
@@ -190,7 +192,7 @@ docker compose up -d --build --wait postgres minio
 ```
 
 Примените начальную миграцию **вручную**, один раз, к пустой БД. Если в `.env`
-изменены `PGUSER` или `PGDATABASE`, замените `musica` в командах:
+изменены `DB_USER` или `DB_NAME`, замените `musica` в командах:
 
 ```sh
 docker compose exec postgres psql -U musica -d musica -v ON_ERROR_STOP=1 -f /migrations/001_init.sql
@@ -243,7 +245,7 @@ Backend не создаёт бакет и не применяет миграци
 
 Переменные описаны в [`.env.example`](.env.example). Файлы `.env` автоматически
 не читаются: передайте значения через окружение процесса или ваш менеджер сервисов.
-Обязательны `PGPASSWORD`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+Обязательны `DB_PASSWORD`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 
 HTTP-сервер заранее выделяет четыре буфера по 64 КиБ для тел запросов
 (всего 256 КиБ). Их размер не зависит от `MAX_UPLOAD_BYTES`: большие тела
@@ -252,14 +254,25 @@ HTTP-сервер заранее выделяет четыре буфера по
 | Переменная | По умолчанию |
 | --- | --- |
 | `HTTP_HOST`, `HTTP_PORT` | `127.0.0.1`, `8080` |
-| `PGHOST` | `127.0.0.1` |
-| `PGPORT` | `5432` |
-| `PGDATABASE`, `PGUSER` | `musica` |
+| `DB_HOST` | `127.0.0.1` |
+| `DB_PORT` | `5432` |
+| `DB_NAME`, `DB_USER` | `musica` |
 | `S3_ENDPOINT` | `http://127.0.0.1:9000` |
 | `S3_REGION` | `us-east-1` |
 | `S3_BUCKET` | `media` (Compose задаёт `uploads`) |
 | `MAX_UPLOAD_BYTES` | `67108864` (64 MiB), максимум 512 MiB |
 | `AUTH_COOKIE_SECURE` | `false`; установите `true` при HTTPS |
+| `REGISTRATION_ENABLED` | `false`; публичная регистрация отключена |
+| `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` | Не заданы; задайте вместе для создания первого администратора |
+| `SHARED_TRACK_RETENTION_SECONDS` | `604800` (7 дней без пользовательских привязок) |
+
+Сервисная учётка создаётся при запуске. При отключённой публичной регистрации
+создайте стартового администратора через `BOOTSTRAP_ADMIN_*`, затем добавляйте
+пользователей через `POST /api/admin/users`. Compose явно передаёт обе переменные
+из окружения или корневого `.env`. Если обе пустые или не заданы, создание
+стартового администратора отключено; задание только одной — ошибка конфигурации.
+Worker скачивания обслуживает Spotify и Web; текущие имена его настроек
+`SPOTIFY_WORKER_ENABLED`, `SPOTIFY_TIMEOUT_SECONDS` и `SPOTIFY_TMP_DIR` сохранены.
 
 `S3_ENDPOINT` указывает на S3 API, а не на web console MinIO. Поддерживаются
 HTTP/HTTPS и path-style URL; endpoint должен быть без пути, query и credentials.
@@ -274,11 +287,11 @@ S3-пользователю нужны `s3:PutObject`, `s3:GetObject` для т�
 из каталога `backend/`:
 
 ```powershell
-$env:PGHOST = '127.0.0.1'
-$env:PGPORT = '5432'
-$env:PGDATABASE = 'musica'
-$env:PGUSER = 'musica'
-$env:PGPASSWORD = 'ваш-пароль-БД'
+$env:DB_HOST = '127.0.0.1'
+$env:DB_PORT = '5432'
+$env:DB_NAME = 'musica'
+$env:DB_USER = 'musica'
+$env:DB_PASSWORD = 'ваш-пароль-БД'
 $env:S3_ACCESS_KEY_ID = 'ваш-access-key'
 $env:S3_SECRET_ACCESS_KEY = 'ваш-secret-key'
 zig build run
@@ -301,7 +314,9 @@ psql -h 127.0.0.1 -p 5432 -U musica -d musica -v ON_ERROR_STOP=1 -f migrations/0
 ```
 
 Замените параметры подключения при необходимости. Пароль `psql` запрашивает
-интерактивно либо читает из `PGPASSWORD`. Файл создаёт актуальную схему целиком
+интерактивно либо читает из стандартной переменной `PGPASSWORD`.
+Переменные `DB_*` относятся к Musica; `psql` не читает их автоматически.
+Файл создаёт актуальную схему целиком
 в одной транзакции: пользователей, сессии, плейлисты, связи, треки, enum статуса,
 триггер дефолтного `Uploads` и общую очередь `public.jobs` с индексами и ограничениями.
 Таблицы приложения, enum и функция триггера размещаются в `musica`, очередь —
@@ -636,9 +651,9 @@ Debug-конфигурация VS Code читает `backend/.env`; после �
 Copy-Item backend/.env.example backend/.env
 ```
 
-В `backend/.env` задайте реальные `PGPASSWORD`, `S3_ACCESS_KEY_ID` и
+В `backend/.env` задайте реальные `DB_PASSWORD`, `S3_ACCESS_KEY_ID` и
 `S3_SECRET_ACCESS_KEY`, а также адреса сервисов. Для хранилищ из Compose
-используйте `PGHOST=127.0.0.1`, опубликованный `PGPORT` и
+используйте `DB_HOST=127.0.0.1`, опубликованный `DB_PORT` и
 `S3_ENDPOINT=http://127.0.0.1:9000` (или ваш опубликованный порт MinIO).
 Учётные данные должны совпадать с корневым `.env` Compose.
 Запустите только хранилища: `docker compose up -d --wait postgres minio`.
@@ -658,6 +673,49 @@ breakpoint в `src/main.zig` или обработчике маршрута и �
 **Shift+F5** останавливает отлаживаемый backend.
 
 Описание параметров отладчика: [документация VS Code](https://code.visualstudio.com/docs/cpp/launch-json-reference).
+
+## Сборка для ARM64 и x86-64
+
+Обычный `zig build` использует текущую платформу и архитектуру. При указании
+`-Dtarget` используется выбранная платформа. Обычная сборка и отдельные цели
+Linux/Windows переиспользуют общую логику создания и установки backend.
+Результат обычной сборки — `zig-out/bin/musica-backend` на Linux и
+`zig-out/bin/musica-backend.exe` на Windows; `--prefix` меняет корневой каталог.
+
+Из `backend/` доступны отдельные цели сборки для Linux и Windows:
+
+```sh
+zig build build-arm64 -Doptimize=ReleaseSafe
+zig build build-x86-64 -Doptimize=ReleaseSafe
+zig build build-windows-arm64 -Doptimize=ReleaseSafe
+zig build build-windows-x86-64 -Doptimize=ReleaseSafe
+```
+
+| Цель | Платформа | Бинарник |
+| --- | --- | --- |
+| `build-arm64` | `aarch64-linux-gnu.2.36` | `zig-out/arm64/bin/musica-backend` |
+| `build-x86-64` | `x86_64-linux-gnu.2.36` | `zig-out/x86-64/bin/musica-backend` |
+| `build-windows-arm64` | `aarch64-windows-gnu` | `zig-out/windows/arm64/bin/musica-backend.exe` |
+| `build-windows-x86-64` | `x86_64-windows-gnu` | `zig-out/windows/x86-64/bin/musica-backend.exe` |
+
+При указании `--prefix` каталоги архитектур размещаются под этим префиксом.
+Цели Linux используют glibc 2.36 для базы Debian Bookworm из Dockerfile;
+цели Windows — GNU ABI.
+Они собирают и устанавливают бинарники, не запускают их и не выполняют
+тесты на машине сборки. Режим оптимизации
+задаётся общим `-Doptimize`; без него используется Debug.
+
+Для другой платформы или версии libc используйте стандартный параметр Zig:
+
+```sh
+zig build -Dtarget=aarch64-linux-gnu.2.36 -Doptimize=ReleaseSafe --prefix zig-out/linux-arm64
+```
+
+В этом случае результат — `zig-out/linux-arm64/bin/musica-backend`.
+Запуск и тесты для выбранной платформы выполняйте на совместимой машине
+или с настроенным эмулятором. На сервере также нужны FFmpeg и yt-dlp;
+они не включаются в сам бинарник. Dockerfile уже выбирает архив Zig для
+`amd64` и `arm64` по `TARGETARCH`.
 
 ## Проверки
 
@@ -698,14 +756,21 @@ python backend/tests/api_integration.py --optimize ReleaseSafe --backend-image m
 ```
 
 Нужны Python 3, работающий Docker Compose и Zig 0.16. Скрипт создаёт отдельный
-случайно названный проект с пустой PostgreSQL, применяет `001_init.sql` только в нём,
-проверяет обращения к `public.jobs` при наличии одноимённой таблицы раньше в
+случайно названный проект с пустой PostgreSQL, применяет `001_init.sql`
+только в нём, проверяет обращения к `public.jobs` при
+наличии одноимённой таблицы раньше в
 `search_path`, сессии, права, дефолтные плейлисты, изменение
 метаданных, обложки, шаринг и откат создания трека, затем удаляет тестовые
 контейнеры и volume. Пользовательская БД не затрагивается. S3 здесь заменён
 локальным HTTP-сервером; для проверки настоящего MinIO используйте ручной сценарий.
 Проверяются также ответы и логи при сбоях БД и S3: диагностические в Debug,
 без указания инфраструктуры в Release.
+
+Общие помощники ожидания и выбора свободного порта находятся в `tests/support.py`.
+Ожидание фоновых задач ограничено таймаутом; ошибка содержит последнее состояние.
+Проверка Spotify использует локальную заглушку yt-dlp, проверяет параметры MP3
+и обложки, публикацию в S3, повторы и защиту от завершения устаревшей попытки.
+Реальное скачивание из YouTube в тестах не выполняется.
 
 С `--backend-image` скрипт дополнительно генерирует настоящий MP3, проверяет
 AAC-сегменты через ffprobe, работу двух воркеров и отдельной HTTP-ноды,

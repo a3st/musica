@@ -5,35 +5,70 @@ const model = @import("model.zig");
 const web_int_service = @import("../web_int/service.zig");
 const playlists_repository = @import("../playlists/repository.zig");
 
+/// Проверяет импорт и атомарно создаёт пользовательские плейлисты, привязки общих треков и задачи загрузки.
+/// Дедуплицирует записи внутри импорта; результат в arena не означает завершение скачивания.
 pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Import) !model.Result {
-    try model.validate(input);
+    try model.validateImport(input);
+
     const conn = try app.db.acquire();
     defer conn.release();
+
     try conn.begin();
     errdefer conn.rollback() catch {};
+
     var tracks: std.StringHashMapUnmanaged([]const u8) = .empty;
     defer tracks.deinit(arena);
+
     const playlists = try arena.alloc([]const u8, input.playlists.len);
     for (input.playlists, 0..) |playlist, index| {
-        playlists[index] = try playlists_repository.create(conn, arena, user, std.mem.trim(u8, playlist.title, " \t\r\n"), playlist.description, "[]", "private");
+        playlists[index] = try playlists_repository.create(
+            conn,
+            arena,
+            user,
+            std.mem.trim(u8, playlist.title, " \t\r\n"),
+            playlist.description,
+            "[]",
+            "private",
+        );
         for (playlist.tracks) |track| {
             const track_id = try createTrack(conn, arena, app.storage.bucket, user, track, &tracks);
             try playlists_repository.addTrack(conn, arena, playlists[index], user, track_id);
         }
     }
     for (input.library) |track| _ = try createTrack(conn, arena, app.storage.bucket, user, track, &tracks);
+
     var unique: std.StringHashMapUnmanaged(void) = .empty;
     defer unique.deinit(arena);
+
     var ids = tracks.valueIterator();
     while (ids.next()) |track_id| try unique.put(arena, track_id.*, {});
+
     try conn.commit();
+
     return .{ .tracks = unique.count(), .playlists = playlists };
 }
 
-fn createTrack(conn: *database.Connection, arena: std.mem.Allocator, bucket: []const u8, user: []const u8, track: model.Track, tracks: *std.StringHashMapUnmanaged([]const u8)) ![]const u8 {
-    const entry = try tracks.getOrPut(arena, try model.identity(arena, track));
+/// Переиспользует трек внутри импорта или передаёт его создание и постановку загрузки сервису web_int.
+/// Принимает соединение с транзакцией вызывающего кода; результат хранится в arena.
+fn createTrack(
+    conn: *database.Connection,
+    arena: std.mem.Allocator,
+    bucket: []const u8,
+    user: []const u8,
+    track: model.Track,
+    tracks: *std.StringHashMapUnmanaged([]const u8),
+) ![]const u8 {
+    const entry = try tracks.getOrPut(arena, try model.importDeduplicationKey(arena, track));
     if (entry.found_existing) return entry.value_ptr.*;
-    const id = try web_int_service.create(conn, arena, bucket, user, .{ .title = track.title, .artist = track.artist }, if (track.spotify_uri) |uri| .{ .provider = "spotify", .external_id = uri[14..] } else null);
+    const id = try web_int_service.create(
+        conn,
+        arena,
+        bucket,
+        user,
+        .{ .title = track.title, .artist = track.artist },
+        if (track.spotify_uri) |uri| .{ .provider = "spotify", .external_id = uri[14..] } else null,
+    );
     entry.value_ptr.* = id;
+
     return id;
 }

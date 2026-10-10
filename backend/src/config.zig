@@ -28,8 +28,11 @@ pub const Config = struct {
     shared_track_retention_seconds: u32,
 
     /// Читает окружение, подставляет значения по умолчанию и проверяет ограничения.
-    /// Учётные данные стартового администратора должны быть заданы вместе.
+    /// Учётные данные стартового администратора должны быть заданы вместе; пустая пара отключает создание.
     pub fn load(env: *const std.process.Environ.Map) !Config {
+        const admin_username = env.get("BOOTSTRAP_ADMIN_USERNAME") orelse "";
+        const admin_password = env.get("BOOTSTRAP_ADMIN_PASSWORD") orelse "";
+
         const config: Config = .{
             .http_address = try loadHttpAddress(env),
             .database = try database.Settings.load(env),
@@ -49,8 +52,8 @@ pub const Config = struct {
 
             .cookie_secure = try parseBoolean(env.get("AUTH_COOKIE_SECURE") orelse "false"),
             .registration_enabled = try parseBoolean(env.get("REGISTRATION_ENABLED") orelse "false"),
-            .bootstrap_admin_username = env.get("BOOTSTRAP_ADMIN_USERNAME"),
-            .bootstrap_admin_password = env.get("BOOTSTRAP_ADMIN_PASSWORD"),
+            .bootstrap_admin_username = if (admin_username.len > 0) admin_username else null,
+            .bootstrap_admin_password = if (admin_password.len > 0) admin_password else null,
 
             .shared_track_retention_seconds = try std.fmt.parseInt(
                 u32,
@@ -92,4 +95,35 @@ fn loadHttpAddress(env: *const std.process.Environ.Map) !std.Io.net.IpAddress {
 
     return std.Io.net.IpAddress.parse(env.get("HTTP_HOST") orelse "127.0.0.1", port) catch
         error.InvalidConfiguration;
+}
+
+test "bootstrap admin accepts an empty pair and rejects incomplete credentials" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    try env.put("DB_PASSWORD", "fixture-db-password");
+    try env.put("S3_ACCESS_KEY_ID", "fixture-access");
+    try env.put("S3_SECRET_ACCESS_KEY", "fixture-secret");
+
+    const absent = try Config.load(&env);
+    try std.testing.expect(absent.bootstrap_admin_username == null);
+    try std.testing.expect(absent.bootstrap_admin_password == null);
+
+    try env.put("BOOTSTRAP_ADMIN_USERNAME", "");
+    try env.put("BOOTSTRAP_ADMIN_PASSWORD", "");
+    const empty = try Config.load(&env);
+    try std.testing.expect(empty.bootstrap_admin_username == null);
+    try std.testing.expect(empty.bootstrap_admin_password == null);
+
+    try env.put("BOOTSTRAP_ADMIN_USERNAME", "fixture_admin");
+    try std.testing.expectError(error.InvalidConfiguration, Config.load(&env));
+
+    try env.put("BOOTSTRAP_ADMIN_USERNAME", "");
+    try env.put("BOOTSTRAP_ADMIN_PASSWORD", "fixture-admin-password");
+    try std.testing.expectError(error.InvalidConfiguration, Config.load(&env));
+
+    try env.put("BOOTSTRAP_ADMIN_USERNAME", "fixture_admin");
+    const configured = try Config.load(&env);
+    try std.testing.expectEqualStrings("fixture_admin", configured.bootstrap_admin_username.?);
+    try std.testing.expectEqualStrings("fixture-admin-password", configured.bootstrap_admin_password.?);
 }

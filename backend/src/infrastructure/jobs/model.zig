@@ -56,10 +56,25 @@ pub const Job = struct {
 test "job payload decoding checks runtime JSON types and required fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const T = struct { count: u32 };
-    const value = try std.json.parseFromSliceLeaky(Payload, arena.allocator(), "{\"count\":2}", .{});
-    const job: Job = .{ .id = "id", .kind = "custom", .dedupe_key = null, .state = .queued, .attempt_id = null, .attempts = 0, .max_attempts = null, .lease_until = null, .available_at = 0, .created_at = 0, .updated_at = 0, .payload = value };
-    try std.testing.expectEqual(@as(u32, 2), (try job.decodePayload(T, arena.allocator())).count);
+
+    const CountPayload = struct { count: u32 };
+    const payload = try std.json.parseFromSliceLeaky(Payload, arena.allocator(), "{\"count\":2}", .{});
+    const job: Job = .{
+        .id = "id",
+        .kind = "custom",
+        .dedupe_key = null,
+        .state = .queued,
+        .attempt_id = null,
+        .attempts = 0,
+        .max_attempts = null,
+        .lease_until = null,
+        .available_at = 0,
+        .created_at = 0,
+        .updated_at = 0,
+        .payload = payload,
+    };
+
+    try std.testing.expectEqual(@as(u32, 2), (try job.decodePayload(CountPayload, arena.allocator())).count);
     try std.testing.expectError(error.InvalidJobPayload, job.decodePayload(struct { missing: bool }, arena.allocator()));
     try std.testing.expectError(error.InvalidJobPayload, job.decodePayload(struct { count: bool }, arena.allocator()));
 }

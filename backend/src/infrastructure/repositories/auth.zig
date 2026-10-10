@@ -1,6 +1,6 @@
 const std = @import("std");
 const database = @import("../database.zig");
-const Login = @import("../../features/auth/model.zig").Login;
+const StoredCredentials = @import("../../features/auth/model.zig").StoredCredentials;
 
 /// Создаёт пользователя с готовым хешем пароля и возвращает его ID.
 pub fn createUser(
@@ -16,7 +16,7 @@ pub fn createUser(
 }
 
 /// Возвращает ID и хеш пароля обычного пользователя; null, если он не найден.
-pub fn findCredentials(conn: *database.Connection, arena: std.mem.Allocator, username: []const u8) !?Login {
+pub fn findCredentials(conn: *database.Connection, arena: std.mem.Allocator, username: []const u8) !?StoredCredentials {
     const query =
         \\SELECT json_build_object('id', id, 'password_hash', password_hash)::text
         \\FROM musica.users
@@ -26,7 +26,7 @@ pub fn findCredentials(conn: *database.Connection, arena: std.mem.Allocator, use
 
     const body = (try conn.queryText(arena, query, .{username})) orelse return null;
 
-    return std.json.parseFromSliceLeaky(Login, arena, body, .{}) catch error.DatabaseUnavailable;
+    return std.json.parseFromSliceLeaky(StoredCredentials, arena, body, .{}) catch error.DatabaseUnavailable;
 }
 
 /// Сохраняет сессию по хешу токена; срок действия задаётся схемой БД.
