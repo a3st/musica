@@ -155,7 +155,6 @@ export const english = {
     'Select Playlists.json and YourLibrary.json from your Spotify export. You can use just one file. Imported playlists are private; all tracks also go to Uploads.',
   'spotify.duplicateExport': 'Select one Playlists.json and one YourLibrary.json file',
   'spotify.expectedList': 'Expected a list in Spotify JSON',
-  'spotify.failures': ' · failed: {count}',
   'spotify.files': 'Spotify JSON files',
   'spotify.fileTooLarge': '{filename}: file exceeds 16 MB',
   'spotify.importLimit': 'An import can contain up to 5,000 track entries and 100 playlists',
@@ -170,16 +169,12 @@ export const english = {
   'spotify.preview': '{tracks} unique tracks · {playlists} playlists{skipped}',
   'spotify.queued': '{count} tracks queued. You can close this window.',
   'spotify.reading': 'Reading files…',
-  'spotify.retry': 'Retry failed downloads',
   'spotify.searchHint':
     'Tracks are searched by title and artist. The version found may differ from the Spotify original.',
   'spotify.selectFiles': 'Select one or two Spotify JSON files',
   'spotify.skipped': ' · skipped podcasts and local files: {count}',
-  'spotify.status':
-    'Ready: {completed} of {total} · downloading: {downloading} · queued: {queued} · preparing: {preparing}{failures}',
   'spotify.submit': 'Create and download tracks',
   'spotify.title': 'Import from Spotify',
-  'spotify.tracksDeleted': 'Tracks from this import have been deleted',
   'spotify.unsupportedExport':
     'Select Playlists.json or YourLibrary.json from your Spotify data export',
   'tracks.actions': 'Track actions for {title}',

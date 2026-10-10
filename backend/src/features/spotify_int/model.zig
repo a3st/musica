@@ -1,9 +1,7 @@
 const std = @import("std");
 const tracks_model = @import("../tracks/model.zig");
 const playlists_model = @import("../playlists/model.zig");
-const Job = @import("../../infrastructure/jobs/model.zig").Job;
 
-pub const download_job_kind = "spotify_download";
 pub const max_tracks = 5000;
 pub const max_playlists = 100;
 pub const max_json_bytes = 4 * 1024 * 1024;
@@ -11,9 +9,7 @@ pub const max_json_bytes = 4 * 1024 * 1024;
 pub const Track = struct { title: []const u8, artist: []const u8, spotify_uri: ?[]const u8 = null };
 pub const Playlist = struct { title: []const u8, description: []const u8 = "", tracks: []const Track };
 pub const Import = struct { playlists: []const Playlist = &.{}, library: []const Track = &.{} };
-pub const Payload = struct { import_id: []const u8, user_id: []const u8, track_id: []const u8, track: Track };
-pub const Task = struct { job: Job, payload: Payload };
-pub const Result = struct { id: []const u8, tracks: usize, playlists: []const []const u8 };
+pub const Result = struct { tracks: usize, playlists: []const []const u8 };
 
 pub fn validate(input: Import) !void {
     if (input.playlists.len > max_playlists) return error.InvalidInput;

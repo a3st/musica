@@ -43,7 +43,7 @@ Musica — self-hosted музыкальный плеер. Репозиторий
   в `backend/src/infrastructure/database.zig`. Вне infrastructure используйте
   `Database`/`Connection`; не импортируйте `pg` и не размещайте PostgreSQL-запросы.
   Общие вспомогательные функции HTTP размещайте в `backend/src/helpers/`.
-  Запросы в infrastructure-репозиториях выполняйте через `Connection.text/exec`.
+  Запросы в infrastructure-репозиториях выполняйте через `Connection.queryText/exec`.
 - SQL-миграции размещайте в `backend/migrations/` с последовательными номерами.
   Начальная схема для пустой БД находится в `001_init.sql`.
   Пользователь выполняет их вручную: не добавляйте автоприменение при запуске

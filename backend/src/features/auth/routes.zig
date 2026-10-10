@@ -13,7 +13,8 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 }
 
 fn signup(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const input = (try api.json(req, res, model.Credentials)) orelse return;
+    if (!app.registration_enabled) return api.failure(res, error.Forbidden);
+    const input = (try api.readJson(req, res, model.Credentials)) orelse return;
     const result = service.register(app, res.arena, input) catch |err| return api.failure(res, err);
     res.status = 201;
     res.header("Cache-Control", "no-store");
@@ -22,7 +23,7 @@ fn signup(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn login(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const input = (try api.json(req, res, model.Credentials)) orelse return;
+    const input = (try api.readJson(req, res, model.Credentials)) orelse return;
     const result = service.login(app, res.arena, input) catch |err| return api.failure(res, err);
     res.header("Cache-Control", "no-store");
     try sessionCookie(app, res, &result.token, false);
@@ -45,5 +46,5 @@ fn sessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: boo
 
 fn me(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const user = service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    api.jsonText(res, service.me(&app.db, res.arena, user) catch |err| return api.failure(res, err));
+    api.sendJsonText(res, service.me(&app.db, res.arena, user) catch |err| return api.failure(res, err));
 }

@@ -22,7 +22,7 @@ fn remove(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const input = (try api.jsonOpts(req, res, model.CreateTrack, .{ .max_bytes = 16 * 1024 })) orelse return;
+    const input = (try api.readJsonWithOptions(req, res, model.CreateTrack, .{ .max_bytes = 16 * 1024 })) orelse return;
     _ = model.validateCreate(input) catch |err| return api.failure(res, err);
     const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     const id = service.create(app, res.arena, user, input) catch |err| return api.failure(res, err);

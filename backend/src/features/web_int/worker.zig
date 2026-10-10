@@ -15,16 +15,16 @@ pub fn run(app: *App) anyerror!void {
         defer arena.deinit();
         const task = service.claim(&app.db, arena.allocator()) catch |err| {
             if (err == error.Canceled) return err;
-            std.log.err("Spotify queue unavailable: {s}", .{@errorName(err)});
+            std.log.err("Web queue unavailable: {s}", .{@errorName(err)});
             try std.Io.sleep(io, .fromSeconds(5), .awake);
             continue;
         };
         if (task) |value| {
             process(app, arena.allocator(), value) catch |err| {
                 if (err == error.Canceled) return err;
-                std.log.err("Spotify download failed for {s}, attempt {s}: {s}", .{ value.payload.track_id, value.job.attempt_id.?, @errorName(err) });
+                std.log.err("Web download failed for {s}, attempt {s}: {s}", .{ value.payload.track_id, value.job.attempt_id.?, @errorName(err) });
                 const retryable = err != error.FileNotFound and err != error.InvalidInput and err != error.InvalidText and err != error.TrackNotFound and err != error.FileTooLarge;
-                service.failed(&app.db, value, retryable) catch |failure| std.log.err("Spotify job failure update failed: {s}", .{@errorName(failure)});
+                service.failed(&app.db, value, retryable) catch |failure| std.log.err("Web job failure update failed: {s}", .{@errorName(failure)});
             };
         } else try std.Io.sleep(io, .fromSeconds(1), .awake);
     }
@@ -63,7 +63,7 @@ fn timeout(io: std.Io, seconds: u32) anyerror!void {
 }
 
 pub fn arguments(app: *App, arena: std.mem.Allocator, track: model.Track) ![]const []const u8 {
-    try model.validateTrack(track);
+    _ = try tracks_model.validateCreate(.{ .title = track.title, .artist = track.artist });
     const query = try std.fmt.allocPrint(arena, "ytsearch1:{s} {s}", .{ std.mem.trim(u8, track.artist, " \t\r\n"), std.mem.trim(u8, track.title, " \t\r\n") });
     const max_size = try std.fmt.allocPrint(arena, "{d}", .{app.max_upload_bytes});
     // No shell, user URL or filename is accepted; the search is always one argv element.
@@ -75,7 +75,7 @@ fn download(app: *App, arena: std.mem.Allocator, task: model.Task) anyerror!void
     const state = blk: {
         const conn = try app.db.acquire();
         defer conn.release();
-        break :blk try repository.trackStatus(conn, arena, task.payload.user_id, task.payload.track_id);
+        break :blk try repository.readTrackStatus(conn, arena, task.payload.user_id, task.payload.track_id);
     };
     if (state == .pending) {
         const io = app.storage.io;
@@ -86,7 +86,7 @@ fn download(app: *App, arena: std.mem.Allocator, task: model.Task) anyerror!void
         defer {
             const protection = io.swapCancelProtection(.blocked);
             defer _ = io.swapCancelProtection(protection);
-            root.deleteTree(io, task.job.attempt_id.?) catch |err| std.log.warn("Spotify scratch cleanup failed: {s}", .{@errorName(err)});
+            root.deleteTree(io, task.job.attempt_id.?) catch |err| std.log.warn("Web scratch cleanup failed: {s}", .{@errorName(err)});
         }
         var dir = try root.openDir(io, task.job.attempt_id.?, .{});
         defer dir.close(io);
@@ -116,7 +116,7 @@ fn download(app: *App, arena: std.mem.Allocator, task: model.Task) anyerror!void
     // A retry after successful publication resumes here instead of downloading twice.
     _ = try streaming_service.enqueue(&app.db, arena, task.payload.track_id, task.payload.user_id);
     try service.finish(&app.db, task);
-    std.log.info("Spotify track downloaded and HLS queued: {s}", .{task.payload.track_id});
+    std.log.info("Web track downloaded and HLS queued: {s}", .{task.payload.track_id});
 }
 
 test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single argument" {

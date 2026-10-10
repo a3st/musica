@@ -97,8 +97,8 @@ fn registerRecord(db: *database.Database, arena: std.mem.Allocator, username: []
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    const result = try repository.register(conn, arena, username, password_hash);
-    try repository.session(conn, result, token_hash);
+    const result = try repository.createUser(conn, arena, username, password_hash);
+    try repository.createSession(conn, result, token_hash);
     try conn.commit();
     return result;
 }
@@ -106,32 +106,32 @@ fn registerRecord(db: *database.Database, arena: std.mem.Allocator, username: []
 fn credentials(db: *database.Database, arena: std.mem.Allocator, username: []const u8) !?model.Login {
     const conn = try db.acquire();
     defer conn.release();
-    const result = try repository.credentials(conn, arena, username);
+    const result = try repository.findCredentials(conn, arena, username);
     return result;
 }
 
 fn session(db: *database.Database, user_id: []const u8, hash: []const u8) !void {
     const conn = try db.acquire();
     defer conn.release();
-    try repository.session(conn, user_id, hash);
+    try repository.createSession(conn, user_id, hash);
 }
 
 fn resolve(db: *database.Database, arena: std.mem.Allocator, hash: []const u8) ![]const u8 {
     const conn = try db.acquire();
     defer conn.release();
-    const result = try repository.resolve(conn, arena, hash);
+    const result = try repository.resolveSession(conn, arena, hash);
     return result;
 }
 
 pub fn logout(db: *database.Database, hash: []const u8) !void {
     const conn = try db.acquire();
     defer conn.release();
-    try repository.logout(conn, hash);
+    try repository.removeSession(conn, hash);
 }
 
 pub fn me(db: *database.Database, arena: std.mem.Allocator, id: []const u8) ![]const u8 {
     const conn = try db.acquire();
     defer conn.release();
-    const result = try repository.me(conn, arena, id);
+    const result = try repository.readUser(conn, arena, id);
     return result;
 }

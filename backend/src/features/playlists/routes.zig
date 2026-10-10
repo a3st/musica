@@ -27,7 +27,7 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 
 fn list(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    api.jsonText(res, service.list(&app.db, res.arena, user) catch |err| return api.failure(res, err));
+    api.sendJsonText(res, service.list(&app.db, res.arena, user) catch |err| return api.failure(res, err));
 }
 
 fn readImage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
@@ -53,7 +53,7 @@ fn id(req: *httpz.Request, name: []const u8) ![]const u8 {
 }
 
 fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const input = (try api.json(req, res, model.CreatePlaylist)) orelse return;
+    const input = (try api.readJson(req, res, model.CreatePlaylist)) orelse return;
     const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     const playlist = service.create(app, res.arena, user, input) catch |err| return api.failure(res, err);
     res.status = 201;
@@ -64,12 +64,12 @@ fn create(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 fn read(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const playlist = id(req, "id") catch |err| return api.failure(res, err);
     const user = auth_service.optionalUser(app, req, res.arena) catch |err| return api.failure(res, err);
-    api.jsonText(res, service.read(&app.db, res.arena, playlist, user) catch |err| return api.failure(res, err));
+    api.sendJsonText(res, service.read(&app.db, res.arena, playlist, user) catch |err| return api.failure(res, err));
 }
 
 fn update(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const playlist = id(req, "id") catch |err| return api.failure(res, err);
-    const input = (try api.json(req, res, model.CreatePlaylist)) orelse return;
+    const input = (try api.readJson(req, res, model.CreatePlaylist)) orelse return;
     const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     service.update(app, res.arena, user, playlist, input) catch |err| return api.failure(res, err);
     res.status = 204;
@@ -79,7 +79,7 @@ fn update(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 fn setMemberRole(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     const playlist = id(req, "id") catch |err| return api.failure(res, err);
     const target = id(req, "user_id") catch |err| return api.failure(res, err);
-    const input = (try api.json(req, res, struct { role: model.Role })) orelse return;
+    const input = (try api.readJson(req, res, struct { role: model.Role })) orelse return;
     const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
     service.setMemberRole(&app.db, res.arena, playlist, user, target, @tagName(input.role)) catch |err| return api.failure(res, err);
     res.status = 204;
@@ -142,7 +142,7 @@ fn shared(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
     if (!auth_model.validToken(token)) return api.failure(res, error.NotFound);
     const hash = auth_model.tokenHash(token);
     res.header("Referrer-Policy", "no-referrer");
-    api.jsonText(res, service.readShared(&app.db, res.arena, &hash) catch |err| return api.failure(res, err));
+    api.sendJsonText(res, service.readShared(&app.db, res.arena, &hash) catch |err| return api.failure(res, err));
 }
 
 fn setImage(app: *App, req: *httpz.Request, res: *httpz.Response) !void {

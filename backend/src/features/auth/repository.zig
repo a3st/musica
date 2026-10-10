@@ -1,8 +1,13 @@
 const impl = @import("../../infrastructure/repositories/auth.zig");
 
-pub const register = impl.register;
-pub const credentials = impl.credentials;
-pub const session = impl.session;
-pub const resolve = impl.resolve;
-pub const logout = impl.logout;
-pub const me = impl.me;
+pub const createUser = impl.createUser;
+
+pub const findCredentials = impl.findCredentials;
+
+pub const createSession = impl.createSession;
+
+pub const resolveSession = impl.resolveSession;
+
+pub const removeSession = impl.removeSession;
+
+pub const readUser = impl.readUser;

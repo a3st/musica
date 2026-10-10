@@ -11,6 +11,11 @@ pub const CleanupPayload = struct { bucket: []const u8, keys: []const []const u8
 pub const CleanupTask = struct { job: Job, payload: CleanupPayload };
 pub const Files = struct { bucket: []const u8, key: []const u8, prefix: ?[]const u8, hls_bucket: ?[]const u8, segments: ?u32 };
 
+pub const Owner = struct {
+    id: []const u8,
+    kind: []const u8,
+};
+
 pub const CreateTrack = struct {
     playlist_ids: []const []const u8 = &.{},
     title: []const u8,

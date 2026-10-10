@@ -21,7 +21,7 @@ frontend/             Svelte 5 + TypeScript + Vite, PWA
   public/             Иконки приложения
 backend/              Zig 0.16.0 + http.zig
   src/main.zig        Инициализация и регистрация фич
-  src/features/       auth, users, playlists, tracks, streaming, spotify_int, health
+  src/features/       auth, users, playlists, tracks, streaming, spotify_int, web_int, health
   src/infrastructure/ PostgreSQL, S3/MinIO и общая очередь jobs
   migrations/         SQL-миграции для ручного выполнения
   build.zig           Сборка и запуск
@@ -82,8 +82,9 @@ Backend слушает только loopback-интерфейс.
 В контекстном меню других плейлистов можно скопировать ссылку для публичного
 доступа или доступа по ссылке; приватные плейлисты сначала требуют изменения
 режима доступа владельцем.
-После сброса БД вручную примените `backend/migrations/001_init.sql`.
-Она создаёт таблицы приложения в схеме `musica`, а общую очередь — в `public.jobs`.
+После сброса БД вручную примените `backend/migrations/001_init.sql`, затем
+`002_shared_library.sql`. История импортов Spotify и таблица `catalog_rate` не создаются.
+Начальная миграция создаёт таблицы приложения в схеме `musica`, а общую очередь — в `public.jobs`.
 
 Проверка API:
 

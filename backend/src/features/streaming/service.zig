@@ -12,7 +12,7 @@ pub fn read(db: *database.Database, arena: std.mem.Allocator, id: []const u8, us
     errdefer conn.rollback() catch {};
     var result = try repository.read(conn, arena, id, user, share_hash);
     const key = try std.ascii.allocLowerString(arena, id);
-    if (try jobs_repository.find(conn, arena, model.preparation_job_kind, key, false)) |job| result.preparation = job.state;
+    if (try jobs_repository.findByKey(conn, arena, model.preparation_job_kind, key)) |job| result.preparation = job.state;
     try conn.commit();
     return result;
 }
@@ -22,11 +22,11 @@ pub fn enqueue(db: *database.Database, arena: std.mem.Allocator, id: []const u8,
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    const input = try repository.preparation(conn, arena, id, user);
+    const input = try repository.lockForPreparation(conn, arena, id, user);
     if (input.status == .pending) return error.TrackNotUploaded;
     if (input.status == .ready) _ = try jobs_repository.enqueue(conn, arena, model.preparation_job_kind, input.payload.track_id, input.payload, 0, 3);
     var result = try repository.read(conn, arena, id, user, null);
-    if (try jobs_repository.find(conn, arena, model.preparation_job_kind, input.payload.track_id, false)) |job| result.preparation = job.state;
+    if (try jobs_repository.findByKey(conn, arena, model.preparation_job_kind, input.payload.track_id)) |job| result.preparation = job.state;
     try conn.commit();
     return result;
 }
@@ -53,7 +53,7 @@ pub fn finish(db: *database.Database, task: model.Task, prefix: []const u8, segm
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.finish(conn, task.payload.track_id, task.payload.bucket, prefix, segments);
+    try repository.finishPreparation(conn, task.payload.track_id, task.payload.bucket, prefix, segments);
     try jobs_repository.complete(conn, task.job);
     try conn.commit();
 }

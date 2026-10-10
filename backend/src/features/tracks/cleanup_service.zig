@@ -4,7 +4,7 @@ const model = @import("model.zig");
 const jobs_repository = @import("../../infrastructure/jobs/repository.zig");
 
 pub fn enqueue(conn: *database.Connection, arena: std.mem.Allocator, bucket: []const u8, keys: []const []const u8, delay: u32) ![]const u8 {
-    const task = try jobs_repository.insert(conn, arena, model.cleanup_job_kind, model.CleanupPayload{ .bucket = bucket, .keys = keys }, delay, null);
+    const task = try jobs_repository.enqueueNew(conn, arena, model.cleanup_job_kind, model.CleanupPayload{ .bucket = bucket, .keys = keys }, delay, null);
     return task.id;
 }
 
@@ -39,7 +39,7 @@ pub fn retry(db: *database.Database, task: model.CleanupTask) !void {
 pub fn finish(db: *database.Database, task: model.CleanupTask) !void {
     const conn = try db.acquire();
     defer conn.release();
-    try jobs_repository.deleteOwned(conn, task.job);
+    try jobs_repository.removeLeased(conn, task.job);
 }
 
 pub fn heartbeat(db: *database.Database, task: model.CleanupTask) !void {

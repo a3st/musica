@@ -27,7 +27,7 @@ BACKEND = ROOT / "backend"
 def run_checks(optimize="Debug", backend_image=None):
     project = "musica-api-test-" + uuid.uuid4().hex[:8]
     env = os.environ.copy()
-    env.update(PGDATABASE="musica", PGUSER="musica", PGPASSWORD="test-db-password",
+    env.update(REGISTRATION_ENABLED="true", PGDATABASE="musica", PGUSER="musica", PGPASSWORD="test-db-password",
                PGPORT="0", S3_ACCESS_KEY_ID="test-access", S3_SECRET_ACCESS_KEY="test-secret",
                S3_REGION="us-east-1", S3_BUCKET="uploads")
     compose = ["docker", "compose", "--env-file", str(ROOT / ".env.docker.example"), "-p", project]
@@ -126,7 +126,7 @@ def run_checks(optimize="Debug", backend_image=None):
 
     def start_node(worker):
         name = project + '-node-' + str(len(containers))
-        node_env = dict(HTTP_HOST='0.0.0.0', HTTP_PORT='8080', PGHOST='postgres', PGPORT='5432',
+        node_env = dict(REGISTRATION_ENABLED='true', HTTP_HOST='0.0.0.0', HTTP_PORT='8080', PGHOST='postgres', PGPORT='5432',
                         PGDATABASE='musica', PGUSER='musica', PGPASSWORD='test-db-password',
                         S3_ENDPOINT=f'http://host.docker.internal:{storage.server_port}',
                         S3_REGION='us-east-1', S3_BUCKET='uploads', S3_ACCESS_KEY_ID='test-access',
@@ -144,7 +144,8 @@ def run_checks(optimize="Debug", backend_image=None):
         docker("up", "-d", "--wait", "postgres")
         port = docker("port", "postgres", "5432").rsplit(":", 1)[1]
         docker("exec", "-T", "postgres", "psql", "-U", "musica", "-d", "musica", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/001_init.sql")
-        assert sql("SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_schema, table_name) FROM information_schema.tables WHERE table_schema IN ('musica','public') AND table_type='BASE TABLE'") == "musica.playlist_members,musica.playlists,musica.sessions,musica.track_playlists,musica.tracks,musica.users,public.jobs"
+        docker("exec", "-T", "postgres", "psql", "-U", "musica", "-d", "musica", "-v", "ON_ERROR_STOP=1", "-f", "/migrations/002_shared_library.sql")
+        assert sql("SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_schema, table_name) FROM information_schema.tables WHERE table_schema IN ('musica','public') AND table_type='BASE TABLE'") == "musica.catalog_cache,musica.playlist_members,musica.playlists,musica.sessions,musica.track_playlists,musica.track_sources,musica.tracks,musica.users,public.jobs"
         # Application queries must work without musica in search_path; jobs must ignore shadow.jobs.
         sql("CREATE SCHEMA shadow; CREATE TABLE shadow.jobs (LIKE public.jobs INCLUDING ALL); ALTER ROLE musica SET search_path=shadow,public")
         shadow_job = sql("INSERT INTO shadow.jobs (kind,payload) VALUES ('delete_s3_objects','{\"bucket\":\"shadow\",\"keys\":[\"must-not-delete\"]}') RETURNING id::text").splitlines()[0]
@@ -229,11 +230,11 @@ def run_checks(optimize="Debug", backend_image=None):
             assert failure == {"error": "database_unavailable" if optimize == "Debug" else "internal_error"}
         finally:
             sql("ALTER TABLE musica.temporarily_unavailable_playlists RENAME TO playlists")
-        assert sql("SELECT count(*) FROM musica.playlists WHERE is_default") == "2"
+        assert sql("SELECT count(*) FROM musica.playlists p JOIN musica.users u ON u.id=p.owner_id WHERE p.is_default AND u.kind='user'") == "2"
         assert sql("SELECT count(*) FROM musica.sessions WHERE length(token_hash)=64") == "2"
         assert sql(f"SELECT count(*) FROM musica.sessions WHERE token_hash='{a}'") == "0"
         request("POST", "/api/auth/register", {"username": "alice", "password": password}, expected=409)
-        assert sql("SELECT count(*) FROM musica.playlists WHERE is_default") == "2"
+        assert sql("SELECT count(*) FROM musica.playlists p JOIN musica.users u ON u.id=p.owner_id WHERE p.is_default AND u.kind='user'") == "2"
         request("POST", "/api/auth/login", {"username": "alice", "password": "incorrect-password"}, expected=401)
         request("POST", "/api/auth/login", {"username": "missing", "password": password}, expected=401)
         login = request("POST", "/api/auth/login", {"username": "alice", "password": password})

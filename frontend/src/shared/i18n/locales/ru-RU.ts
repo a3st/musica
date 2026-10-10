@@ -153,7 +153,6 @@ export const russian = {
     'Выберите Playlists.json и YourLibrary.json из выгрузки Spotify. Можно загрузить только один из файлов. Плейлисты будут приватными, все треки также попадут в Uploads.',
   'spotify.duplicateExport': 'Выберите по одному файлу Playlists.json и YourLibrary.json',
   'spotify.expectedList': 'В Spotify JSON ожидался список',
-  'spotify.failures': ' · ошибки: {count}',
   'spotify.files': 'Файлы Spotify JSON',
   'spotify.fileTooLarge': '{filename}: файл превышает 16 МБ',
   'spotify.importLimit': 'За один импорт можно передать до 5000 записей треков и 100 плейлистов',
@@ -168,16 +167,12 @@ export const russian = {
   'spotify.preview': '{tracks} уникальных треков · {playlists} плейлистов{skipped}',
   'spotify.queued': '{count} треков поставлены в очередь. Можно закрыть это окно.',
   'spotify.reading': 'Читаем файлы…',
-  'spotify.retry': 'Повторить неудачные загрузки',
   'spotify.searchHint':
     'Треки ищутся по названию и исполнителю. Найденная версия может отличаться от оригинала в Spotify.',
   'spotify.selectFiles': 'Выберите один или два файла Spotify JSON',
   'spotify.skipped': ' · пропущено подкастов и локальных файлов: {count}',
-  'spotify.status':
-    'Готово: {completed} из {total} · скачивание: {downloading} · в очереди: {queued} · подготовка: {preparing}{failures}',
   'spotify.submit': 'Создать и загрузить треки',
   'spotify.title': 'Импорт из Spotify',
-  'spotify.tracksDeleted': 'Треки этого импорта удалены',
   'spotify.unsupportedExport':
     'Выберите Playlists.json или YourLibrary.json из выгрузки данных Spotify',
   'tracks.actions': 'Действия с треком {title}',

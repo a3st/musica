@@ -1,7 +1,6 @@
 <script lang="ts">
   import Dialog from '../../../shared/ui/Dialog.svelte';
   import Icon from '../../../shared/ui/Icon.svelte';
-  import type { SpotifyImportStatus } from '../model';
   import type { SpotifyState } from '../state.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   let { state: controller, language }: { state: SpotifyState; language: LanguageState } = $props();
@@ -18,25 +17,6 @@
           })
         : '',
   );
-  const progress = $derived.by(() => {
-    const current = controller.current;
-    if (!current) return controller.notice;
-    const count = (predicate: (track: SpotifyImportStatus['tracks'][number]) => boolean) =>
-      current.tracks.filter(predicate).length;
-    return (
-      controller.notice ||
-      language.t('spotify.status', {
-        completed: count((track) => track.status === 'streamed'),
-        total: current.tracks.length,
-        downloading: count((track) => track.download === 'processing'),
-        queued: count((track) => track.download === 'queued'),
-        preparing: count((track) => track.status === 'ready' && track.preparation !== 'failed'),
-        failures: controller.failed
-          ? language.t('spotify.failures', { count: controller.failed })
-          : '',
-      })
-    );
-  });
 </script>
 
 <Dialog id="spotify-dialog" bind:open={controller.open}>
@@ -86,14 +66,5 @@
       >{language.t('spotify.submit')}<Icon name="arrow" /></button
     >
   </form>
-  <p id="spotify-progress" aria-live="polite">{progress}</p>
-  <button
-    id="spotify-retry"
-    class="button secondary"
-    hidden={!controller.failed}
-    disabled={controller.busy}
-    onclick={() => {
-      void controller.retry();
-    }}>{language.t('spotify.retry')}</button
-  >
+  <p id="spotify-progress" aria-live="polite">{controller.notice}</p>
 </Dialog>

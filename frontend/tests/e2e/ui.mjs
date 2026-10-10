@@ -35,8 +35,6 @@ const members = new Map([[id(2), [...tracks]], [id(3), [tracks[0]]], [id(4), [tr
 const mutations = [];
 let authenticated = true;
 let nextId = 20;
-let spotifyImport = null;
-let spotifyFailed = true;
 let failImage = false;
 let failLibrary = false;
 let expireLibrary = false;
@@ -93,13 +91,7 @@ await page.route('**/api/**', async (route) => {
     const p = metadata(nextId++, input.playlists[0].title); playlists.push(p);
     const t = { id: id(nextId++), owner_id: user.id, title: input.library[0].title, artist: input.library[0].artist, status: 'pending' };
     tracks.push(t); members.get(id(2)).push(t); members.set(p.id, [t]);
-    spotifyImport = { id: id(nextId++), track: t };
-    return json({ id: spotifyImport.id, tracks: 1, playlists: [p.id] }, 202);
-  }
-  if (spotifyImport && path.startsWith('/api/spotify/imports/')) {
-    if (path.endsWith('/retry')) { spotifyFailed = false; spotifyImport.track.status = 'streamed'; }
-    const t = spotifyImport.track;
-    return json({ id: spotifyImport.id, tracks: [{ id: t.id, title: t.title, artist: t.artist, download: spotifyFailed ? 'failed' : 'completed', status: t.status, preparation: spotifyFailed ? null : 'completed' }] });
+    return json({ tracks: 1, playlists: [p.id] }, 202);
   }
   if (path === '/api/playlists' && method === 'POST') {
     const p = { ...metadata(nextId++, ''), ...request.postDataJSON() }; playlists.push(p); members.set(p.id, []); return json({ id: p.id }, 201);
@@ -493,14 +485,17 @@ try {
     { name: 'YourLibrary.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ tracks: [{ track: 'Get Lucky', artist: 'Daft Punk', uri }] })) },
   ]);
   await page.getByText('1 уникальных треков · 1 плейлистов', { exact: true }).waitFor();
-  await page.locator('#spotify-start').click(); await page.locator('#spotify-retry').waitFor();
-  await page.locator('#spotify-retry').click(); await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
+  await page.locator('#spotify-start').click();
+  await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.length > 0);
+  assert.equal(await page.locator('#spotify-retry').count(), 0);
+  assert.equal(await page.locator('#spotify-start').isDisabled(), true);
   assert.equal(mutations.filter((m) => m.path === '/api/spotify/import').length, 1);
   await page.locator('#spotify-dialog [data-close]').click();
   const selectedBeforeReload = await page.locator('h1').textContent();
   await page.reload(); await page.getByRole('heading', { name: selectedBeforeReload, exact: true }).waitFor();
   await openSpotify();
-  await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.includes('Готово: 1 из 1'));
+  assert.equal(await page.locator('#spotify-progress').textContent(), '');
+  assert.equal(mutations.some((m) => m.path.startsWith('/api/spotify/imports/')), false);
   await page.locator('#spotify-dialog [data-close]').click();
   for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport); await overflow();

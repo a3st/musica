@@ -35,7 +35,7 @@ pub fn image(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const 
         defer conn.release();
         try conn.begin();
         errdefer conn.rollback() catch {};
-        try repository.requireWrite(conn, arena, id, user, false);
+        try repository.lockForWrite(conn, arena, id, user, false);
         if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
         const value = try tracks_cleanup_service.reserve(conn, arena, app.storage.bucket, key);
         try conn.commit();
@@ -53,7 +53,7 @@ pub fn image(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const 
         try conn.begin();
         errdefer conn.rollback() catch {};
         // Recheck permissions: an editor can be revoked while S3 is receiving the image.
-        try repository.requireWrite(conn, arena, id, user, false);
+        try repository.lockForWrite(conn, arena, id, user, false);
         if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
         try repository.setImage(conn, id, key);
         try tracks_cleanup_service.publish(conn, reservation);
@@ -102,7 +102,7 @@ pub fn setMemberRole(db: *database.Database, arena: std.mem.Allocator, id: []con
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, owner, true);
+    try repository.lockForWrite(conn, arena, id, owner, true);
     if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     if (std.ascii.eqlIgnoreCase(owner, user)) return error.InvalidInput;
     try repository.setMemberRole(conn, id, user, role);
@@ -114,7 +114,7 @@ pub fn removeMember(db: *database.Database, arena: std.mem.Allocator, id: []cons
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, owner, true);
+    try repository.lockForWrite(conn, arena, id, owner, true);
     if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     if (std.ascii.eqlIgnoreCase(owner, user)) return error.InvalidInput;
     try repository.removeMember(conn, id, user);
@@ -126,7 +126,7 @@ pub fn link(db: *database.Database, arena: std.mem.Allocator, id: []const u8, us
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, user, true);
+    try repository.lockForWrite(conn, arena, id, user, true);
     if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     try repository.setLink(conn, id, hash);
     try conn.commit();
@@ -144,7 +144,7 @@ fn updateRecord(db: *database.Database, arena: std.mem.Allocator, id: []const u8
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, user, false);
+    try repository.lockForWrite(conn, arena, id, user, false);
     if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     try repository.update(conn, id, title, description, tags, visibility);
     try conn.commit();
@@ -155,7 +155,7 @@ pub fn addTrack(db: *database.Database, arena: std.mem.Allocator, id: []const u8
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, user, false);
+    try repository.lockForWrite(conn, arena, id, user, false);
     try repository.addTrack(conn, arena, id, user, track_id);
     try conn.commit();
 }
@@ -165,7 +165,7 @@ pub fn remove(app: *App, arena: std.mem.Allocator, user: []const u8, id: []const
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, user, true);
+    try repository.lockForWrite(conn, arena, id, user, true);
     if (try repository.isDefault(conn, arena, id)) return error.DefaultPlaylistProtected;
     if (try repository.remove(conn, arena, id)) |key| {
         _ = try tracks_cleanup_service.enqueue(conn, arena, app.storage.bucket, &.{key}, 0);
@@ -178,10 +178,10 @@ pub fn removeTrack(db: *database.Database, arena: std.mem.Allocator, id: []const
     defer conn.release();
     try conn.begin();
     errdefer conn.rollback() catch {};
-    try repository.requireWrite(conn, arena, id, user, false);
+    try repository.lockForWrite(conn, arena, id, user, false);
     if (try repository.isDefault(conn, arena, id)) {
-        try repository.containsTrack(conn, arena, id, track_id);
-        try tracks_operations.remove(conn, arena, user, track_id);
+        try repository.requireTrack(conn, arena, id, track_id);
+        try tracks_operations.removeFromLibrary(conn, arena, user, track_id, id);
     } else {
         try repository.removeTrack(conn, id, track_id);
     }

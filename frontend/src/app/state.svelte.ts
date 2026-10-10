@@ -34,10 +34,7 @@ export class Application {
     () => this.refresh(),
     (message) => this.notify(message),
   );
-  readonly spotify = new SpotifyState(
-    (id) => this.refresh(id),
-    () => this.auth.user?.id ?? null,
-  );
+  readonly spotify = new SpotifyState((id) => this.refresh(id));
   readonly editor = new PlaylistEditorState(
     (id) => {
       this.library.shareLinks.delete(id);
@@ -131,7 +128,6 @@ export class Application {
       await this.selectPlaylist(navigation.id);
     } else await this.refresh();
     if (version !== this.sessionVersion || this.disposed) return;
-    if (this.auth.user) await this.spotify.restore();
   }
   async start(): Promise<void> {
     await this.openSession();
@@ -250,8 +246,6 @@ export class Application {
     this.polling = true;
     try {
       await this.uploads.poll();
-      if (version !== this.sessionVersion || this.disposed) return;
-      await this.spotify.poll();
       if (version !== this.sessionVersion || this.disposed) return;
       await this.library.poll();
     } catch (error) {

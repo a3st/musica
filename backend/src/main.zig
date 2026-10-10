@@ -1,9 +1,12 @@
 const std = @import("std");
 const httpz = @import("httpz");
+
 const Config = @import("config.zig").Config;
 const App = @import("app.zig").App;
+
 const database = @import("infrastructure/database.zig");
 const S3 = @import("infrastructure/s3.zig").S3;
+
 const health_routes = @import("features/health/routes.zig");
 const tracks_routes = @import("features/tracks/routes.zig");
 const playlists_routes = @import("features/playlists/routes.zig");
@@ -12,24 +15,50 @@ const streaming_routes = @import("features/streaming/routes.zig");
 const streaming_worker = @import("features/streaming/worker.zig");
 const tracks_cleanup_worker = @import("features/tracks/cleanup_worker.zig");
 const spotify_int_routes = @import("features/spotify_int/routes.zig");
-const spotify_int_worker = @import("features/spotify_int/worker.zig");
+const web_int_worker = @import("features/web_int/worker.zig");
+const users_service = @import("features/users/service.zig");
+const users_routes = @import("features/users/routes.zig");
+const web_int_cleanup_worker = @import("features/web_int/cleanup_worker.zig");
 
+/// Создаёт ресурсы приложения, регистрирует маршруты и запускает сервер и фоновые задачи.
+/// При завершении останавливает фоновые задачи и сервер перед освобождением S3 и БД.
 pub fn main(init: std.process.Init) !void {
     const config = try Config.load(init.environ_map);
+
     var app: App = .{
         .db = try database.Database.init(init.io, init.gpa, config.database),
         .storage = S3.init(init.io, init.gpa, config.s3),
+
         .max_upload_bytes = config.max_upload_bytes,
         .ffmpeg_path = config.ffmpeg_path,
         .ytdlp_path = config.ytdlp_path,
+
         .spotify_tmp_dir = config.spotify_tmp_dir,
         .spotify_timeout_seconds = config.spotify_timeout_seconds,
+
         .hls_tmp_dir = config.hls_tmp_dir,
         .hls_timeout_seconds = config.hls_timeout_seconds,
+
         .cookie_secure = config.cookie_secure,
+        .registration_enabled = config.registration_enabled,
+
+        .shared_track_retention_seconds = config.shared_track_retention_seconds,
     };
     defer app.db.deinit();
     defer app.storage.deinit();
+
+    {
+        var arena = std.heap.ArenaAllocator.init(init.gpa);
+        defer arena.deinit();
+
+        try users_service.bootstrap(
+            &app,
+            arena.allocator(),
+            config.bootstrap_admin_username,
+            config.bootstrap_admin_password,
+        );
+    }
+
     var server = try httpz.Server(*App).init(init.io, init.gpa, .{
         .address = .{ .ip = config.http_address },
         .request = .{ .max_body_size = config.max_upload_bytes },
@@ -47,14 +76,15 @@ pub fn main(init: std.process.Init) !void {
     tracks_routes.register(router);
     playlists_routes.register(router);
     auth_routes.register(router);
+    users_routes.register(router);
     streaming_routes.register(router);
     spotify_int_routes.register(router);
 
-    var spotify_future: ?std.Io.Future(anyerror!void) = if (config.spotify_worker_enabled)
-        try init.io.concurrent(spotify_int_worker.run, .{&app})
+    var web_int_future: ?std.Io.Future(anyerror!void) = if (config.spotify_worker_enabled)
+        try init.io.concurrent(web_int_worker.run, .{&app})
     else
         null;
-    defer if (spotify_future) |*future| future.cancel(init.io) catch {};
+    defer if (web_int_future) |*future| future.cancel(init.io) catch {};
 
     var hls_future: ?std.Io.Future(anyerror!void) = if (config.hls_worker_enabled)
         try init.io.concurrent(streaming_worker.run, .{&app})
@@ -65,14 +95,18 @@ pub fn main(init: std.process.Init) !void {
     var cleanup_future: std.Io.Future(anyerror!void) = try init.io.concurrent(tracks_cleanup_worker.run, .{&app});
     defer cleanup_future.cancel(init.io) catch {};
 
+    var unused_future = try init.io.concurrent(web_int_cleanup_worker.run, .{&app});
+    defer unused_future.cancel(init.io) catch {};
+
     std.log.info("Musica API listening on {f}", .{config.http_address});
+
     try server.listen();
 }
 
 test {
     _ = @import("features/spotify_int/model.zig");
     _ = @import("features/spotify_int/routes.zig");
-    _ = @import("features/spotify_int/worker.zig");
+    _ = @import("features/web_int/worker.zig");
     _ = @import("infrastructure/jobs/model.zig");
     _ = @import("features/playlists/model.zig");
     _ = @import("features/playlists/routes.zig");
