@@ -1,20 +1,17 @@
-import { playlistsApi } from '../playlists/api';
+import { webSearchApi } from './api';
 import type { Track } from '../tracks/model';
 import { t } from '../../shared/i18n';
 
-/** Ждёт появления загруженного файла в Uploads; отменяется при смене воспроизведения. */
-export async function waitForDownloadedTrack(
-  id: string,
-  uploadsId: string,
-  signal: AbortSignal,
-): Promise<Track> {
+/** Ждёт загрузки общего трека без привязки к Uploads; отменяется при смене воспроизведения. */
+export async function waitForDownloadedTrack(id: string, signal: AbortSignal): Promise<Track> {
   const deadline = Date.now() + 15 * 60 * 1000;
   while (Date.now() < deadline) {
     signal.throwIfAborted();
-    const playlist = await playlistsApi.playlist(uploadsId, signal);
-    const track = playlist.tracks.find((item) => item.id === id);
-    if (!track) throw new Error(t('web.trackUnavailable'));
+    const state = await webSearchApi.playback(id, signal);
+    const track = state.track;
     if (track.status !== 'pending') return track;
+    if (state.download === 'failed' || state.download === null)
+      throw new Error(t('web.trackUnavailable'));
     await new Promise<void>((resolve, reject) => {
       const abort = () => {
         clearTimeout(timer);

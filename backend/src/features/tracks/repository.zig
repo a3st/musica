@@ -1,6 +1,6 @@
 const impl = @import("../../infrastructure/repositories/tracks.zig");
 
-pub const create = impl.create;
+pub const searchLibrary = impl.searchLibrary;
 
 pub const lockForDeletion = impl.lockForDeletion;
 
@@ -17,3 +17,5 @@ pub const lockOwner = impl.lockOwner;
 pub const setMetadata = impl.setMetadata;
 
 pub const readArtwork = impl.readArtwork;
+
+pub const create = impl.create;

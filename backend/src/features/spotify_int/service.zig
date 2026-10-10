@@ -48,7 +48,7 @@ pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, input: mode
     return .{ .tracks = unique.count(), .playlists = playlists };
 }
 
-/// Переиспользует трек внутри импорта или передаёт его создание и постановку загрузки сервису web_int.
+/// Переиспользует трек внутри импорта или готовит скачивание и добавляет общий трек в Uploads.
 /// Принимает соединение с транзакцией вызывающего кода; результат хранится в arena.
 fn createTrack(
     conn: *database.Connection,
@@ -60,14 +60,17 @@ fn createTrack(
 ) ![]const u8 {
     const entry = try tracks.getOrPut(arena, try model.importDeduplicationKey(arena, track));
     if (entry.found_existing) return entry.value_ptr.*;
-    const id = try web_int_service.create(
+
+    const uploads = try playlists_repository.lockDefault(conn, arena, user);
+    const id = try web_int_service.ensureDownload(
         conn,
         arena,
         bucket,
-        user,
         .{ .title = track.title, .artist = track.artist },
         if (track.spotify_uri) |uri| .{ .provider = "spotify", .external_id = uri[14..] } else null,
     );
+    try playlists_repository.addTrack(conn, arena, uploads, user, id);
+
     entry.value_ptr.* = id;
 
     return id;

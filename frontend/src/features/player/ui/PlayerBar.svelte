@@ -21,7 +21,7 @@
 </script>
 
 <footer class="player">
-  <div class="now-playing" hidden={!value.current}>
+  <div class="now-playing" hidden={!value.current && !value.loading} aria-live="polite">
     <div id="now-art" class="mini-cover empty-cover">
       {#if value.current}<TrackArtwork
           track={value.current}
@@ -30,7 +30,8 @@
         />{:else}<Icon name="music" />{/if}
     </div>
     <div class="now-text">
-      <strong id="now-title">{value.current?.title ?? ''}</strong><span id="now-artist"
+      <strong id="now-title">{value.current?.title ?? language.t('player.preparing')}</strong><span
+        id="now-artist"
         >{value.loading ? language.t('player.preparing') : (value.current?.artist ?? '')}</span
       >
     </div>
@@ -58,7 +59,8 @@
         aria-label={language.t(value.paused ? 'player.play' : 'player.pause')}
         disabled={!value.current || value.loading}
         onclick={() => controller.engine.toggle()}
-        ><Icon name={value.paused ? 'play' : 'pause'} /></button
+        >{#if value.loading}<span class="spinner" aria-label={language.t('player.preparing')}
+          ></span>{:else}<Icon name={value.paused ? 'play' : 'pause'} />{/if}</button
       >
       <button
         id="player-next"

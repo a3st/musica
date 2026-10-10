@@ -18,7 +18,7 @@ globalThis.Audio = AudioFixture;
 if (!globalThis.navigator) globalThis.navigator = {};
 const { PlayerEngine } = await import(moduleUrl(new URL('../../src/features/player/engine.ts', import.meta.url)));
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const track = n => ({ id: id(n), owner_id: id(1), title: `Track ${n}`, artist: 'Artist', status: 'streamed' });
+const track = n => ({ id: id(n), owner_kind: 'user', owner_id: id(1), title: `Track ${n}`, artist: 'Artist', status: 'streamed' });
 const [first, second, third] = [track(10), track(11), track(12)];
 let changes = 0;
 const notices = [];
@@ -121,7 +121,7 @@ globalThis.fetch = async (url, options) => {
     ? { status: 'ready', preparation: null }
     : { status: 'streamed', preparation: 'completed' }), { headers: { 'Content-Type': 'application/json' } });
 };
-await deferred.loadDeferred(async () => ({ ...first, status: 'ready', owner_id: id(99), shared: true }));
+await deferred.loadDeferred(async () => ({ ...first, status: 'ready', owner_id: id(99), owner_kind: 'system' }));
 assert.equal(deferred.current.id, first.id);
 assert.equal(deferred.snapshot().paused, false, 'a downloaded service-owned track starts automatically');
 assert.deepEqual(deferredNotices, []);

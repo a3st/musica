@@ -110,8 +110,15 @@
   signIn={(username, password, register) => app.signIn(username, password, register)}
 />
 <PlaylistEditor state={app.editor} language={app.language} />
-<UploadDialog state={app.uploads} language={app.language} spotify={() => app.importSpotify()} />
-<SpotifyDialog state={app.spotify} language={app.language} />
+<UploadDialog
+  state={app.uploads}
+  language={app.language}
+  spotify={() => app.importSpotify()}
+  spotifyEnabled={app.capabilities.spotify_import}
+/>
+{#if app.capabilities.spotify_import}
+  <SpotifyDialog state={app.spotify} language={app.language} />
+{/if}
 <ContextMenu menu={app.menu} />
 <Dialog
   id="confirm-dialog"

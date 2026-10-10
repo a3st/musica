@@ -26,9 +26,9 @@ const user = { id: id(1), username: 'music_lover', default_playlist_id: id(2) };
 const metadata = (n, title, isDefault = false) => ({ id: id(n), owner_id: user.id, title, description: '',
   tags: ['ambient'], visibility: 'private', is_default: isDefault, image_key: null, role: 'owner', track_count: 0 });
 const tracks = [
-  { id: id(10), owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed', duration_seconds: 183, artwork_key: 'tracks/first/artwork/initial.jpg' },
-  { id: id(11), owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed', artwork_key: 'missing.jpg' },
-  { id: id(12), owner_id: user.id, title: '<img src=x onerror=alert(1)>', artist: 'Test', status: 'pending' },
+  { id: id(10), owner_kind: 'user', owner_id: user.id, title: 'Midnight City', artist: 'M83', status: 'streamed', duration_seconds: 183, artwork_key: 'tracks/first/artwork/initial.jpg' },
+  { id: id(11), owner_kind: 'user', owner_id: user.id, title: 'Weightless', artist: 'Marconi Union', status: 'streamed', artwork_key: 'missing.jpg' },
+  { id: id(12), owner_kind: 'user', owner_id: user.id, title: '<img src=x onerror=alert(1)>', artist: 'Test', status: 'pending' },
 ];
 let playlists = [metadata(2, 'Uploads', true), metadata(3, 'Тихие вечера'), metadata(4, 'В дороге')];
 const members = new Map([[id(2), [...tracks]], [id(3), [tracks[0]]], [id(4), [tracks[1]]]]);
@@ -57,6 +57,13 @@ await page.route('**/api/**', async (route) => {
   const request = route.request(); const path = new URL(request.url()).pathname;
   if (!path.startsWith('/api/')) return route.continue();
   const method = request.method(); const json = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify(data) });
+  if (path === '/api/tracks/search') {
+    const words = new URL(request.url()).searchParams.get('q').toLowerCase().split(/\s+/);
+    return json({ tracks: tracks.filter(t => t.status !== 'pending' && words.every(w => `${t.title} ${t.artist}`.toLowerCase().includes(w)))
+      .map(t => ({ track: { ...t, owner_kind: 'user' }, playlist_id: id(2) })) });
+  }
+  if (path === '/api/web/search') return json({ library: [], catalog: [] });
+  if (path === '/api/capabilities') return json({ web_search: true, spotify_import: true });
   if (path === '/api/users/me') {
     if (holdMe) {
       holdMe = false;
@@ -89,7 +96,7 @@ await page.route('**/api/**', async (route) => {
     assert.equal(input.playlists[0].title, 'Spotify mix');
     assert.equal(input.library[0].spotify_uri, input.playlists[0].tracks[0].spotify_uri);
     const p = metadata(nextId++, input.playlists[0].title); playlists.push(p);
-    const t = { id: id(nextId++), owner_id: user.id, title: input.library[0].title, artist: input.library[0].artist, status: 'pending' };
+    const t = { id: id(nextId++), owner_kind: 'user', owner_id: user.id, title: input.library[0].title, artist: input.library[0].artist, status: 'pending' };
     tracks.push(t); members.get(id(2)).push(t); members.set(p.id, [t]);
     return json({ tracks: 1, playlists: [p.id] }, 202);
   }
@@ -122,7 +129,7 @@ await page.route('**/api/**', async (route) => {
     return route.fulfill({ status: 204 });
   }
   if (path === '/api/tracks' && method === 'POST') {
-    const body = request.postDataJSON(); const t = { id: id(nextId++), title: body.title, artist: body.artist, owner_id: user.id, status: 'pending' };
+    const body = request.postDataJSON(); const t = { id: id(nextId++), title: body.title, artist: body.artist, owner_kind: 'user', owner_id: user.id, status: 'pending' };
     tracks.push(t); for (const p of new Set([id(2), ...body.playlist_ids])) members.get(p).push(t);
     return json({ id: t.id, status: t.status }, 201);
   }
@@ -273,7 +280,7 @@ try {
   assert.equal(await handle.getAttribute('aria-valuenow'), '244');
   await page.setViewportSize({ width: 1440, height: 400 });
   const thumb = page.locator('.collection-scrollbar-thumb'); await thumb.waitFor();
-  assert.ok((await thumb.boundingBox()).height <= 80, 'compact scrollbar thumb');
+  assert.ok((await thumb.boundingBox()).height <= 60, 'compact scrollbar thumb');
   await thumb.focus(); await page.keyboard.press('End');
   await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
   await page.keyboard.press('Home');
@@ -281,6 +288,12 @@ try {
   const railBox = await page.locator('.collection-scrollbar').boundingBox(); const thumbBox = await thumb.boundingBox();
   const collectionBox = await page.locator('#collection').boundingBox();
   assert.equal(railBox.width, 8, 'playlist scrollbar is thicker');
+  const corners = await page.locator('#collection').evaluate(element => {
+    const style = getComputedStyle(element);
+    return { top: parseFloat(style.borderTopRightRadius), bottom: parseFloat(style.borderBottomRightRadius) };
+  });
+  assert.ok(railBox.y >= collectionBox.y + corners.top, 'playlist thumb clears the top rounded corner');
+  assert.ok(railBox.y + railBox.height <= collectionBox.y + collectionBox.height - corners.bottom, 'playlist thumb clears the bottom rounded corner');
   assert.ok(Math.abs(railBox.x + railBox.width - collectionBox.x - collectionBox.width) < 1, 'playlist scrollbar is flush with the panel edge');
   await page.mouse.move(thumbBox.x + 3, thumbBox.y + thumbBox.height / 2); await page.mouse.down(); await page.mouse.move(railBox.x + 3, railBox.y + railBox.height); await page.mouse.up();
   await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');

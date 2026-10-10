@@ -4,6 +4,7 @@ const Database = @import("infrastructure/database.zig").Database;
 const S3 = @import("infrastructure/s3.zig").S3;
 const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
 const api = @import("helpers/api.zig");
+const capabilities_model = @import("features/capabilities/model.zig");
 
 /// Общие ресурсы и настройки HTTP-обработчиков и фоновых задач.
 /// После первого обращения к S3 структура должна оставаться по стабильному адресу.
@@ -38,6 +39,9 @@ pub const App = struct {
 
     cookie_secure: bool,
     registration_enabled: bool,
+
+    /// Итоговые возможности после проверки зависимостей интеграций при запуске.
+    capabilities: capabilities_model.Capabilities,
 
     /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
     shared_track_retention_seconds: u32,

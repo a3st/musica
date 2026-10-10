@@ -7,7 +7,13 @@
     state: controller,
     language,
     spotify,
-  }: { state: UploadsState; language: LanguageState; spotify: () => void } = $props();
+    spotifyEnabled,
+  }: {
+    state: UploadsState;
+    language: LanguageState;
+    spotify: () => void;
+    spotifyEnabled: boolean;
+  } = $props();
   let input: HTMLInputElement;
   let dragging = $state(false);
 </script>
@@ -77,11 +83,13 @@
       }}
     />
   </div>
-  <button
-    class="button secondary spotify-import-link"
-    data-action="spotify-import"
-    onclick={spotify}>{language.t('spotify.title')}</button
-  >
+  {#if spotifyEnabled}
+    <button
+      class="button secondary spotify-import-link"
+      data-action="spotify-import"
+      onclick={spotify}>{language.t('spotify.title')}</button
+    >
+  {/if}
   <div id="upload-list" class="upload-list" aria-live="polite">
     {#each controller.queue as item (item.key)}
       <div class={`upload-item ${item.state}`} data-upload-key={item.key}>

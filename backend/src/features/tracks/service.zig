@@ -4,11 +4,24 @@ const model = @import("model.zig");
 const repository = @import("repository.zig");
 const operations = @import("operations.zig");
 const playlists_repository = @import("../playlists/repository.zig");
+const web_int_model = @import("../web_int/model.zig");
 const cleanup_service = @import("cleanup_service.zig");
 const jobs_repository = @import("../../infrastructure/jobs/repository.zig");
 const Job = @import("../../infrastructure/jobs/model.zig").Job;
 const auth_model = @import("../auth/model.zig");
-const web_int_model = @import("../web_int/model.zig");
+
+/// Ищет пользовательские треки в публичных, собственных и доступных по членству плейлистах.
+pub fn searchLibrary(app: *App, arena: std.mem.Allocator, user: []const u8, query: []const u8) ![]const model.LibraryMatch {
+    const validated = try model.validateSearch(query);
+    var words: std.ArrayList([]const u8) = .empty;
+    var tokens = std.mem.tokenizeAny(u8, validated, " \t\r\n");
+    while (tokens.next()) |word| try words.append(arena, word);
+
+    const conn = try app.db.acquire();
+    defer conn.release();
+
+    return repository.searchLibrary(conn, arena, user, try std.json.Stringify.valueAlloc(arena, words.items, .{}));
+}
 
 /// Проверяет метаданные и атомарно создаёт трек с привязками к Uploads и дополнительным плейлистам.
 pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, raw: model.CreateTrack) ![36]u8 {
@@ -20,7 +33,10 @@ pub fn create(app: *App, arena: std.mem.Allocator, user: []const u8, raw: model.
     try conn.begin();
     errdefer conn.rollback() catch {};
 
+    const uploads_playlist_id = try playlists_repository.lockDefault(conn, arena, user);
     const id = try repository.create(conn, arena, user, app.storage.bucket, input);
+
+    try playlists_repository.addTrack(conn, arena, uploads_playlist_id, user, &id);
     for (input.playlist_ids) |playlist_id| {
         try playlists_repository.lockForWrite(conn, arena, playlist_id, user, false);
         try playlists_repository.addTrack(conn, arena, playlist_id, user, &id);
@@ -58,7 +74,7 @@ pub fn upload(
     return uploadImpl(app, arena, user, id, mime, data, null);
 }
 
-/// Загружает исходный файл от имени фоновой задачи; проверяет её действующую аренду до записи и публикации.
+/// Загружает исходный файл от имени фоновой задачи; проверяет её аренду до записи и публикации.
 pub fn uploadForJob(
     app: *App,
     arena: std.mem.Allocator,
@@ -83,7 +99,6 @@ fn uploadImpl(
     guard: ?Job,
 ) !model.UploadLocation {
     const token = try auth_model.generateToken(app.storage.io);
-    // A random UUID identifies the upload owner across nodes.
     const attempt = try std.fmt.allocPrint(
         arena,
         "{s}-{s}-{s}-{s}-{s}",

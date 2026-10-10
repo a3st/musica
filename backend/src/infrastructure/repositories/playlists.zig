@@ -28,9 +28,9 @@ const json_playlist =
     \\            'duration_seconds', t.duration_seconds,
     \\            'artwork_key', t.artwork_key,
     \\            'owner_id', t.owner_id,
-    \\            'shared', EXISTS (
-    \\                SELECT 1 FROM musica.users u
-    \\                WHERE u.id = t.owner_id AND u.kind = 'system'
+    \\            'owner_kind', (
+    \\                SELECT u.kind FROM musica.users u
+    \\                WHERE u.id = t.owner_id
     \\            )
     \\        ) ORDER BY t.created_at, t.id)
     \\        FROM musica.tracks t

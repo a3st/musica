@@ -67,8 +67,8 @@ pub fn remove(
     }
 
     try jobs_repository.removeByKey(conn, streaming_model.preparation_job_kind, key);
-    try jobs_repository.removeByKey(conn, model.upload_job_kind, key);
     try jobs_repository.removeByKey(conn, web_int_model.download_job_kind, key);
+    try jobs_repository.removeByKey(conn, model.upload_job_kind, key);
     try jobs_repository.removeByKey(conn, model.metadata_job_kind, key);
 
     try repository.remove(conn, key);

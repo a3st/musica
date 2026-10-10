@@ -9,6 +9,7 @@ const S3 = @import("infrastructure/s3.zig").S3;
 const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
 
 const health_routes = @import("features/health/routes.zig");
+const capabilities_routes = @import("features/capabilities/routes.zig");
 const tracks_routes = @import("features/tracks/routes.zig");
 const playlists_routes = @import("features/playlists/routes.zig");
 const auth_routes = @import("features/auth/routes.zig");
@@ -51,6 +52,10 @@ pub fn main(init: std.process.Init) !void {
 
         .cookie_secure = config.cookie_secure,
         .registration_enabled = config.registration_enabled,
+        .capabilities = .{
+            .web_search = config.web_int_enabled,
+            .spotify_import = config.spotify_int_enabled,
+        },
 
         .shared_track_retention_seconds = config.shared_track_retention_seconds,
     };
@@ -84,15 +89,16 @@ pub fn main(init: std.process.Init) !void {
 
     const router = try server.router(.{});
     health_routes.register(router);
+    capabilities_routes.register(router);
     tracks_routes.register(router);
     playlists_routes.register(router);
     auth_routes.register(router);
     users_routes.register(router);
     streaming_routes.register(router);
-    spotify_int_routes.register(router);
-    web_int_routes.register(router);
+    if (config.spotify_int_enabled) spotify_int_routes.register(router);
+    if (config.web_int_enabled) web_int_routes.register(router);
 
-    var web_int_future: ?std.Io.Future(anyerror!void) = if (config.spotify_worker_enabled)
+    var web_int_future: ?std.Io.Future(anyerror!void) = if (config.web_int_enabled and config.spotify_worker_enabled)
         try init.io.concurrent(web_int_worker.run, .{&app})
     else
         null;
@@ -122,6 +128,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("features/capabilities/routes.zig");
     _ = @import("infrastructure/catalog/catalog.zig");
     _ = @import("features/tracks/metadata_worker.zig");
     _ = @import("features/web_int/routes.zig");

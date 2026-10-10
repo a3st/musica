@@ -176,6 +176,8 @@ def run_api_checks(optimize="Debug", backend_image=None):
             S3_SECRET_ACCESS_KEY='test-secret',
             HLS_WORKER_ENABLED=str(worker).lower(),
             SPOTIFY_WORKER_ENABLED='false',
+            WEB_INT_ENABLED='true',
+            SPOTIFY_INT_ENABLED='true',
             TRACK_METADATA_WORKER_ENABLED='false',
         )
         command = [
@@ -248,6 +250,8 @@ def run_api_checks(optimize="Debug", backend_image=None):
             S3_ENDPOINT=f"http://127.0.0.1:{storage.server_port}",
             HLS_WORKER_ENABLED='false',
             SPOTIFY_WORKER_ENABLED='false',
+            WEB_INT_ENABLED='true',
+            SPOTIFY_INT_ENABLED='true',
             TRACK_METADATA_WORKER_ENABLED='false',
         )
         executable = BACKEND / "zig-out" / "bin" / ("musica-backend.exe" if os.name == "nt" else "musica-backend")
@@ -308,6 +312,8 @@ def run_api_checks(optimize="Debug", backend_image=None):
                 time.sleep(0.1)
         else:
             raise RuntimeError("backend did not start")
+
+        assert api_request("GET", "/api/capabilities") == {"web_search": True, "spotify_import": True}
 
         password = "integration-password-123"
         alice = api_request(
@@ -944,14 +950,26 @@ def run_api_checks(optimize="Debug", backend_image=None):
             execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('{key}', '{body}', clock_timestamp() + interval '10 minutes')")
         api_request('GET', '/api/web/search?q=Web%20fixture', expected=401)
         api_request('GET', '/api/web/search?q=x', token=a, expected=400)
-        assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['tracks'] == [web_song]
-        assert api_request('GET', '/api/web/search?q=%20Web%20fixture%20', token=a)['tracks'] == [web_song]
-        assert api_request('GET', '/api/web/search?q=Empty%20fixture', token=a)['tracks'] == []
+        assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['catalog'] == [web_song]
+        assert api_request('GET', '/api/web/search?q=%20Web%20fixture%20', token=a)['catalog'] == [web_song]
+        assert api_request('GET', '/api/web/search?q=Empty%20fixture', token=a)['catalog'] == []
         api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, expected=401)
         api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123&other=1'}, token=a, expected=400)
         api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=a, expected=400)
         api_request('POST', '/api/web/tracks', {'provider': 'deezer', 'external_id': '123456'}, token=a, expected=400)
-        first_web = api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, token=a, expected=202)['id']
+        selection = {'provider': 'itunes', 'external_id': '123456'}
+        playback_id = api_request('POST', '/api/web/tracks', {**selection, 'add_to_library': False}, token=a, expected=202)['id']
+        assert execute_sql(f"SELECT count(*) FROM musica.track_playlists WHERE track_id='{playback_id}'") == '0'
+        api_request('GET', '/api/web/tracks/' + playback_id, expected=401)
+        playback = api_request('GET', '/api/web/tracks/' + playback_id, token=a)
+        assert playback['track']['id'] == playback_id and playback['download'] == 'queued'
+        assert api_request('GET', '/api/tracks/' + playback_id + '/hls/status', token=a)['status'] == 'pending'
+        api_request('GET', '/api/tracks/' + playback_id + '/hls/status', expected=404)
+        execute_sql(f"UPDATE public.jobs SET state='failed' WHERE kind='download_track' AND dedupe_key='{playback_id}'")
+        assert api_request('GET', '/api/web/tracks/' + playback_id, token=a)['download'] == 'failed'
+        first_web = api_request('POST', '/api/web/tracks', selection, token=a, expected=202)['id']
+        assert first_web == playback_id
+        assert api_request('GET', '/api/web/tracks/' + playback_id, token=a)['download'] == 'queued'
         second_web = api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, token=b, expected=202)['id']
         assert first_web == second_web
         assert execute_sql(f"SELECT count(*) FROM musica.track_sources WHERE provider='itunes' AND external_id='123456' AND track_id='{first_web}'") == '1'
@@ -961,6 +979,51 @@ def run_api_checks(optimize="Debug", backend_image=None):
         assert execute_sql(f"SELECT count(*) FROM musica.tracks WHERE id='{first_web}'") == '1'
         bob_default = api_request('GET', '/api/users/me', token=b)['default_playlist_id']
         assert any(t['id'] == first_web for t in api_request('GET', '/api/playlists/' + bob_default, token=b)['tracks'])
+        api_request('GET', '/api/web/search?q=Web%20fixture', expected=401)
+        api_request('GET', '/api/web/search?q=x', token=a, expected=400)
+        assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['library'] == [], 'pending service tracks are excluded'
+        private_match = api_request('POST', '/api/tracks', {'title': web_song['title'], 'artist': web_song['artist']}, token=b, expected=201)['id']
+        execute_sql(f"UPDATE musica.tracks SET status='ready', content_type='audio/mpeg', size_bytes=10, uploaded_at=clock_timestamp() WHERE id='{private_match}'")
+        assert api_request('GET', '/api/web/search?q=Web%20fixture', token=a)['library'] == [], 'personal tracks are excluded from shared lookup'
+        execute_sql(f"UPDATE musica.tracks SET status='ready', content_type='audio/mpeg', size_bytes=10, uploaded_at=clock_timestamp(), duration_seconds=123 WHERE id='{first_web}'")
+        remix = {**web_song, 'external_id': '999999', 'title': 'Web fixture (Remix)'}
+        catalog_candidates = [
+            web_song,
+            {**web_song, 'external_id': '888888', 'title': ' WEB fixture [Live] ', 'artist': 'WEB   ARTIST'},
+            {**web_song, 'title': 'Provider corrected title'},
+            remix,
+            {**remix, 'external_id': '777777', 'title': 'web FIXTURE (Remix)'},
+        ]
+        catalog_body = json.dumps(catalog_candidates)
+        execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('catalog:v2:search:itunes:US:25:ARTIST fixture', '{catalog_body}', clock_timestamp() + interval '10 minutes')")
+        shared_result = api_request('GET', '/api/web/search?q=ARTIST%20fixture', token=a)
+        assert shared_result['catalog'] == [remix], 'catalog is searched alongside local results; source/name duplicates are removed and Remix is preserved'
+        results = shared_result['library']
+        assert len(results) == 1 and results[0]['id'] == first_web
+        assert results[0]['owner_kind'] == 'system' and results[0]['duration_seconds'] == 123
+        assert results[0]['artwork_key'] is None
+        assert api_request('GET', '/api/web/search?q=%25', token=a, expected=400)['error'] == 'invalid_input'
+        assert api_request('GET', '/api/tracks/search?q=%25%25', token=a)['tracks'] == [], 'wildcards are literal'
+        api_request('GET', '/api/tracks/search?q=Web%20fixture', expected=401)
+        api_request('GET', '/api/tracks/search?q=x', token=a, expected=400)
+        assert api_request('GET', '/api/tracks/search?q=Web%20fixture', token=a)['tracks'] == [], 'private personal tracks are hidden'
+        personal = api_request('GET', '/api/tracks/search?q=Web%20fixture', token=b)['tracks']
+        assert len(personal) == 1 and personal[0]['track']['id'] == private_match
+        assert personal[0]['playlist_id'] == bob_default and personal[0]['track']['owner_kind'] == 'user'
+        public_playlist = api_request('POST', '/api/playlists', {'title': 'Public search', 'visibility': 'public'}, token=b, expected=201)['id']
+        api_request('PUT', '/api/playlists/' + public_playlist + '/tracks/' + private_match, token=b, expected=204)
+        public_results = api_request('GET', '/api/tracks/search?q=Web%20fixture', token=a)['tracks']
+        assert len(public_results) == 1 and public_results[0]['playlist_id'] == public_playlist
+        assert len(api_request('GET', '/api/tracks/search?q=Web%20fixture', token=b)['tracks']) == 1, 'multiple playlists do not duplicate tracks'
+        execute_sql(f"UPDATE musica.playlists SET visibility='unlisted' WHERE id='{public_playlist}'")
+        assert api_request('GET', '/api/tracks/search?q=Web%20fixture', token=a)['tracks'] == [], 'unlisted is not public'
+        alice_id = api_request('GET', '/api/users/me', token=a)['id']
+        execute_sql(f"INSERT INTO musica.playlist_members(playlist_id, user_id, role) VALUES ('{public_playlist}', '{alice_id}', 'viewer')")
+        assert len(api_request('GET', '/api/tracks/search?q=Web%20fixture', token=a)['tracks']) == 1, 'membership grants search access'
+        execute_sql(f"UPDATE musica.tracks SET status='pending' WHERE id='{private_match}'")
+        assert api_request('GET', '/api/tracks/search?q=Web%20fixture', token=a)['tracks'] == [], 'pending personal tracks are excluded'
+        print('PASS: personal search checks public, owner and member access, unlisted privacy, pending exclusion and deduplication.')
+        print('PASS: authenticated service search, personal/pending exclusion, word matching, metadata and literal wildcards.')
         print('PASS: Web search ACL/cache, verified catalog selection, shared ownership, deduplication and personal unlink.')
         assert api_request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:

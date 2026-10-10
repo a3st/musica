@@ -9,13 +9,16 @@
   function update(): void {
     if (!target || !rail || !thumb) return;
     const rect = target.getBoundingClientRect();
-    const height = Math.max(0, rect.height);
+    const styles = getComputedStyle(target);
+    const top = Math.max(8, parseFloat(styles.borderTopRightRadius) || 0);
+    const bottom = Math.max(8, parseFloat(styles.borderBottomRightRadius) || 0);
+    const height = Math.max(0, rect.height - top - bottom);
     const maximum = target.scrollHeight - target.clientHeight;
     rail.hidden = maximum <= 1 || height < 40;
-    rail.style.top = `${rect.top}px`;
+    rail.style.top = `${rect.top + top}px`;
     rail.style.left = `${rect.right - rail.offsetWidth}px`;
     rail.style.height = `${height}px`;
-    const length = Math.min(80, Math.max(32, (height * target.clientHeight) / target.scrollHeight));
+    const length = Math.min(60, Math.max(24, (height * target.clientHeight) / target.scrollHeight));
     travel = height - length;
     thumb.style.height = `${length}px`;
     thumb.style.top = `${maximum > 0 ? (target.scrollTop / maximum) * travel : 0}px`;

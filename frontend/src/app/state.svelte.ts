@@ -1,5 +1,7 @@
 import { AuthState } from '../features/auth/state.svelte';
 import { authApi } from '../features/auth/api';
+import { capabilitiesApi } from '../features/capabilities/api';
+import type { Capabilities } from '../features/capabilities/model';
 import { PlaylistsState } from '../features/playlists/state.svelte';
 import { PlaylistEditorState } from '../features/playlists/editor.svelte';
 import { PlayerState } from '../features/player/state.svelte';
@@ -11,7 +13,7 @@ import { ThemeState } from '../shared/theme/state.svelte';
 import { MenuState } from '../shared/ui/menu.svelte';
 import { ApiError, errorMessage } from '../shared/api/errors';
 import { readNavigation, selectNavigation } from './navigation';
-import { playlistMenu, trackMenu, webTrackMenu } from './menus';
+import { playlistMenu, trackMenu, webTrackMenu, serviceTrackMenu } from './menus';
 import type { PlaylistSummary } from '../features/playlists/model';
 import type { Track } from '../features/tracks/model';
 import type { SearchTrack } from '../features/web-search/model';
@@ -25,6 +27,7 @@ export interface Confirmation {
   remove: () => Promise<void>;
 }
 export class Application {
+  capabilities = $state<Capabilities>({ web_search: false, spotify_import: false });
   readonly auth = new AuthState();
   readonly library = new PlaylistsState();
   readonly language = new LanguageState();
@@ -41,11 +44,7 @@ export class Application {
   );
   readonly spotify = new SpotifyState((id) => this.refresh(id));
   readonly search = new SearchState(
-    () => ({
-      items: this.library.items,
-      selected: this.library.selected,
-      canSearchWeb: !!this.auth.user,
-    }),
+    () => !!this.auth.user && this.capabilities.web_search,
     () => this.refresh(),
   );
   readonly editor = new PlaylistEditorState(
@@ -113,6 +112,10 @@ export class Application {
     }
   }
   private async loadSession(version: number): Promise<void> {
+    const capabilities = await capabilitiesApi.read();
+    if (version !== this.sessionVersion || this.disposed) return;
+    this.capabilities = capabilities;
+
     const navigation = readNavigation();
     try {
       await this.auth.load();
@@ -216,10 +219,44 @@ export class Application {
     this.search.remember({ kind: 'web', track });
     this.search.web.playingTrackKey = searchTrackKey(track);
     await this.player.engine.loadDeferred(async (signal) => {
-      const id = await this.search.web.add(track, signal);
+      const id = await this.search.web.prepare(track, signal);
       signal.throwIfAborted();
-      return waitForDownloadedTrack(id, user.default_playlist_id, signal);
+      return waitForDownloadedTrack(id, signal);
     });
+  }
+
+  async playServiceTrack(track: Track): Promise<void> {
+    if (!this.requireLogin()) return;
+    this.search.remember({ kind: 'service', track });
+    this.player.cover = null;
+    await this.player.engine.load(track, [track], true);
+  }
+
+  async addServiceTrack(track: Track, playlistId?: string): Promise<void> {
+    const user = this.auth.user;
+    if (!this.requireLogin() || !user) return;
+    const target = playlistId ?? user.default_playlist_id;
+    const addingToUploads = target === user.default_playlist_id;
+    if (addingToUploads && this.search.serviceAdditions[track.id]) return;
+    const version = this.sessionVersion;
+    if (addingToUploads) this.search.serviceAdditions[track.id] = 'adding';
+    try {
+      await playlistsApi.attachTrack(target, track.id);
+      if (version !== this.sessionVersion || this.disposed) return;
+      if (addingToUploads) this.search.serviceAdditions[track.id] = 'added';
+      this.search.remember({ kind: 'service', track });
+      await this.refresh();
+      if (version === this.sessionVersion && !this.disposed)
+        this.notify(this.language.t('tracks.addedToPlaylist'));
+    } catch (error) {
+      if (version === this.sessionVersion && this.search.serviceAdditions[track.id] !== 'added')
+        delete this.search.serviceAdditions[track.id];
+      throw error;
+    }
+  }
+
+  showServiceTrackMenu(track: Track, origin: HTMLElement): void {
+    this.menu.toggle(serviceTrackMenu(this, track), origin);
   }
 
   showWebTrackMenu(track: SearchTrack, origin: HTMLElement): void {
@@ -263,6 +300,8 @@ export class Application {
     }
   }
   importSpotify(): void {
+    if (!this.capabilities.spotify_import) return;
+
     if (this.requireLogin()) {
       this.libraryOpen = false;
       this.uploads.open = false;

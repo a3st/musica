@@ -9,12 +9,37 @@ const tracks_model = @import("../tracks/model.zig");
 const playlists_repository = @import("../playlists/repository.zig");
 const users_repository = @import("../users/repository.zig");
 
-/// Параллельно читает источники с отдельными кешами; успешные результаты возвращаются при частичном отказе.
-pub fn search(app: *App, arena: std.mem.Allocator, query: []const u8) ![]const model.SearchTrack {
-    const validated_query = try model.validateSearch(query);
-    const sources = try app.catalog.searchSources(arena, validated_query);
+/// Ищет до 25 загруженных сервисных треков по всем словам названия и исполнителя.
+fn searchLocal(app: *App, arena: std.mem.Allocator, query: []const u8) ![]const model.Track {
+    const validated = try model.validateSearch(query);
+    var words: std.ArrayList([]const u8) = .empty;
+    var tokens = std.mem.tokenizeAny(u8, validated, " \t\r\n");
+    while (tokens.next()) |word| try words.append(arena, word);
 
-    return searchSources(app, arena, sources, validated_query, searchProvider, .fromSeconds(30));
+    const conn = try app.db.acquire();
+    defer conn.release();
+    return repository.searchLocal(conn, arena, try std.json.Stringify.valueAlloc(arena, words.items, .{}));
+}
+
+/// Ищет загруженные сервисные треки и каталог; совпадения каталога заменяются локальными результатами.
+pub fn search(app: *App, arena: std.mem.Allocator, query: []const u8) !model.SearchResult {
+    const validated_query = try model.validateSearch(query);
+    const local = try searchLocal(app, arena, validated_query);
+    const sources = try app.catalog.searchSources(arena, validated_query);
+    const catalog = searchSources(app, arena, sources, validated_query, searchProvider, .fromSeconds(30)) catch |err| {
+        if (err == error.Canceled or err == error.OutOfMemory or local.len == 0) return err;
+
+        std.log.warn("Catalog unavailable; returning local search results: {s}", .{@errorName(err)});
+        return .{ .library = local, .catalog = &.{} };
+    };
+
+    const conn = try app.db.acquire();
+    defer conn.release();
+
+    return .{
+        .library = local,
+        .catalog = try repository.deduplicateSearchResults(conn, arena, local, catalog),
+    };
 }
 
 const SearchOperation = *const fn (*App, std.mem.Allocator, catalog_model.SearchSource, []const u8) anyerror![]const model.SearchTrack;
@@ -177,8 +202,8 @@ fn readSearchCache(app: *App, arena: std.mem.Allocator, key: []const u8) !?[]con
     return repository.readSearchCache(conn, arena, key);
 }
 
-/// Разрешает ID через каталог и атомарно добавляет общий трек в личную библиотеку.
-pub fn addToLibrary(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Selection) ![]const u8 {
+/// Разрешает ID через каталог, ставит загрузку в очередь и при необходимости добавляет в библиотеку.
+pub fn selectTrack(app: *App, arena: std.mem.Allocator, user: []const u8, input: model.Selection) ![]const u8 {
     try model.validateExternalId(input.external_id);
     const key = try app.catalog.lookupCacheKey(arena, input.provider, input.external_id);
     const track = if (try readSearchCache(app, arena, key)) |body|
@@ -191,41 +216,57 @@ pub fn addToLibrary(app: *App, arena: std.mem.Allocator, user: []const u8, input
     try repository.writeSearchCache(conn, key, try std.json.Stringify.valueAlloc(arena, track, .{}));
     try conn.begin();
     errdefer conn.rollback() catch {};
-    const id = try create(conn, arena, app.storage.bucket, user, .{
-        .title = track.title,
-        .artist = track.artist,
-    }, .{ .provider = @tagName(track.provider), .external_id = track.external_id });
+
+    // Lock the playlist before the shared track and its jobs.
+    const uploads = if (input.add_to_library) try playlists_repository.lockDefault(conn, arena, user) else null;
+    const id = try ensureDownload(
+        conn,
+        arena,
+        app.storage.bucket,
+        .{ .title = track.title, .artist = track.artist },
+        .{ .provider = @tagName(track.provider), .external_id = track.external_id },
+    );
+
+    if (uploads) |playlist| try playlists_repository.addTrack(conn, arena, playlist, user, id);
+
     try conn.commit();
     return id;
 }
 
-/// Переиспользует или создаёт общий трек у сервисной учётки, ставит загрузку в очередь и добавляет его в Uploads пользователя.
+/// Переиспользует или создаёт общий трек у сервисной учётки и ставит загрузку в очередь.
 /// Принимает соединение с транзакцией вызывающего кода; ID трека выделяется в arena.
-pub fn create(
+pub fn ensureDownload(
     conn: *database.Connection,
     arena: std.mem.Allocator,
     bucket: []const u8,
-    user: []const u8,
-    track: model.Track,
+    track: model.CatalogTrack,
     source: ?model.Source,
 ) ![]const u8 {
-    _ = try tracks_model.validateCreate(.{ .title = track.title, .artist = track.artist });
+    const input = try model.validateTrack(track);
     const owner = try users_repository.ensureSystem(conn, arena);
-    // Keep lock order consistent: user/playlist first, then shared track and jobs.
-    const target = try playlists_repository.lockDefault(conn, arena, user);
-    const id = try repository.getOrCreateTrack(conn, arena, bucket, track, source);
+    const id = try repository.getOrCreateCatalogTrack(conn, arena, owner, bucket, input, source);
+
     _ = try jobs_repository.enqueue(
         conn,
         arena,
         model.download_job_kind,
         id,
-        model.Payload{ .user_id = owner, .track_id = id, .track = track },
+        model.Payload{ .user_id = owner, .track_id = id, .track = input },
         0,
         3,
     );
-    try playlists_repository.addTrack(conn, arena, target, user, id);
 
     return id;
+}
+
+/// Читает общий трек и состояние загрузки, не добавляя его в библиотеку.
+pub fn readPlayback(app: *App, arena: std.mem.Allocator, id: []const u8) !model.Playback {
+    if (!tracks_model.isValidId(id)) return error.InvalidTrackId;
+    const conn = try app.db.acquire();
+    defer conn.release();
+    const track = try repository.readPlaybackTrack(conn, arena, id);
+    const job = try jobs_repository.findByKey(conn, arena, model.download_job_kind, id);
+    return .{ .track = track, .download = if (job) |value| value.state else null };
 }
 
 /// Арендует задачу скачивания на 120 секунд и разбирает payload в arena; null, если работы нет.

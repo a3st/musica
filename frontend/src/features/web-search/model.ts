@@ -1,5 +1,11 @@
 import { record, text } from '../../shared/api/validation';
 import { t } from '../../shared/i18n';
+import { track, type Track } from '../tracks/model';
+
+export interface SearchResult {
+  library: Track[];
+  catalog: SearchTrack[];
+}
 
 export interface SearchTrack {
   provider: 'itunes';
@@ -46,4 +52,20 @@ export function parseSearchTracks(value: unknown): SearchTrack[] {
       source_url: secureUrl(item.source_url),
     };
   });
+}
+
+/** Проверяет готовые сервисные треки и дополнительные внешние результаты до отображения. */
+export function parseSearchResult(value: unknown): SearchResult {
+  const result = record(value);
+  if (!Array.isArray(result.library) || result.library.length > 25)
+    throw new Error(t('errors.invalidData'));
+  const ids = new Set<string>();
+  const library = result.library.map((value) => {
+    const item = track(value);
+    if (item.owner_kind !== 'system' || item.status === 'pending' || ids.has(item.id))
+      throw new Error(t('errors.invalidData'));
+    ids.add(item.id);
+    return item;
+  });
+  return { library, catalog: parseSearchTracks({ tracks: result.catalog }) };
 }

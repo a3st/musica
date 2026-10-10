@@ -1,5 +1,6 @@
 const std = @import("std");
 const Job = @import("../../infrastructure/jobs/model.zig").Job;
+const users_model = @import("../users/model.zig");
 
 /// Вид задачи, используемой для аренды загрузки исходного файла.
 pub const upload_job_kind = "upload_track";
@@ -73,7 +74,6 @@ pub const Files = struct {
     bucket: []const u8,
     key: []const u8,
     artwork_key: ?[]const u8,
-
     /// Префикс опубликованного HLS; null, если HLS отсутствует.
     prefix: ?[]const u8,
     hls_bucket: ?[]const u8,
@@ -86,6 +86,34 @@ pub const Owner = struct {
     id: []const u8,
     kind: []const u8,
 };
+
+pub const OwnerKind = users_model.Kind;
+
+/// Метаданные существующего трека для поиска и воспроизведения.
+pub const Track = struct {
+    id: []const u8,
+    title: []const u8,
+    artist: []const u8,
+    owner_id: []const u8,
+    status: Status,
+    owner_kind: OwnerKind,
+    duration_seconds: ?u32,
+    artwork_key: ?[]const u8,
+};
+
+/// Найденный пользовательский трек и доступный плейлист для его воспроизведения.
+pub const LibraryMatch = struct {
+    track: Track,
+    playlist_id: []const u8,
+};
+
+/// Проверяет поисковый запрос от 2 до 256 байт UTF-8 и обрезает крайние пробелы.
+pub fn validateSearch(query: []const u8) ![]const u8 {
+    const trimmed = std.mem.trim(u8, query, " \t\r\n");
+    if (trimmed.len < 2 or trimmed.len > 256 or !std.unicode.utf8ValidateSlice(trimmed))
+        return error.InvalidInput;
+    return trimmed;
+}
 
 /// Метаданные нового трека; файл загружается отдельным запросом.
 pub const CreateTrack = struct {

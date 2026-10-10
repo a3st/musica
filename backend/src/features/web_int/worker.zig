@@ -84,12 +84,12 @@ fn waitForTimeout(io: std.Io, seconds: u32) anyerror!void {
     try std.Io.sleep(io, .fromSeconds(seconds), .awake);
 }
 
-/// Формирует аргументы yt-dlp для поиска одного трека и сохранения MP3 256K с метаданными и обложкой.
+/// Формирует поиск до пяти кандидатов и сохранение одного MP3 256K с метаданными и обложкой.
 /// Поисковая строка передаётся одним аргументом без shell; результат выделяется в arena.
-pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.Track) ![]const []const u8 {
-    _ = try tracks_model.validateCreate(.{ .title = track.title, .artist = track.artist });
+pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.CatalogTrack) ![]const []const u8 {
+    _ = try model.validateTrack(track);
 
-    const query = try std.fmt.allocPrint(arena, "ytsearch1:{s} {s}", .{
+    const query = try std.fmt.allocPrint(arena, "ytsearch5:{s} {s}", .{
         std.mem.trim(u8, track.artist, " \t\r\n"),
         std.mem.trim(u8, track.title, " \t\r\n"),
     });
@@ -100,6 +100,11 @@ pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.Tra
         "--ignore-config",
         "--no-playlist",
         "--no-progress",
+        "--no-abort-on-error",
+        "--age-limit",
+        "0",
+        "--max-downloads",
+        "1",
         "--socket-timeout",
         "30",
         "--retries",
@@ -176,12 +181,14 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
         defer child.kill(io);
 
         switch (try child.wait(io)) {
-            .exited => |code| if (code != 0) return error.DownloadFailed,
+            // yt-dlp exits with 101 after reaching --max-downloads, including a successful download.
+            .exited => |code| if (code != 0 and code != 101) return error.DownloadFailed,
             else => return error.DownloadFailed,
         }
 
         const data = dir.readFileAlloc(io, "source.mp3", arena, .limited(app.max_upload_bytes)) catch |err| {
             if (err == error.StreamTooLong) return error.FileTooLarge;
+            if (err == error.FileNotFound) return error.DownloadFailed;
 
             return err;
         };
@@ -213,7 +220,7 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
     app.ffmpeg_path = "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe";
     app.ytdlp_path = "yt-dlp";
     const argv = try buildYtdlpArguments(&app, arena.allocator(), .{ .title = "Title \"; echo hi", .artist = "Artist" });
-    try std.testing.expectEqualStrings("ytsearch1:Artist Title \"; echo hi", argv[argv.len - 1]);
+    try std.testing.expectEqualStrings("ytsearch5:Artist Title \"; echo hi", argv[argv.len - 1]);
     try std.testing.expectEqualStrings("--", argv[argv.len - 2]);
     var bitrate = false;
     var cover = false;

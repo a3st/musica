@@ -2,6 +2,76 @@ const std = @import("std");
 const database = @import("../database.zig");
 const tracks_model = @import("../../features/tracks/model.zig");
 
+/// Предполагаемый S3-путь для нового трека; n — строка с его UUID в запросе создания.
+pub const source_key_sql = "'tracks/' || n.id::text || '/source'";
+
+/// Ищет до 25 загруженных пользовательских треков в доступных плейлистах без дублей.
+/// Возвращает один доступный playlist_id на трек; поиск не раскрывает приватные плейлисты.
+pub fn searchLibrary(
+    conn: *database.Connection,
+    arena: std.mem.Allocator,
+    user: []const u8,
+    words: []const u8,
+) ![]const tracks_model.LibraryMatch {
+    const query =
+        \\SELECT COALESCE(json_agg(result.item), '[]'::json)::text
+        \\FROM (
+        \\    SELECT json_build_object(
+        \\        'track', json_build_object('id', t.id, 'title', t.title, 'artist', t.artist,
+        \\            'owner_id', t.owner_id, 'status', t.status, 'owner_kind', u.kind,
+        \\            'duration_seconds', t.duration_seconds, 'artwork_key', t.artwork_key),
+        \\        'playlist_id', accessible.id) AS item
+        \\    FROM musica.tracks t JOIN musica.users u ON u.id = t.owner_id
+        \\    JOIN LATERAL (
+        \\        SELECT p.id FROM musica.track_playlists tp
+        \\        JOIN musica.playlists p ON p.id = tp.playlist_id
+        \\        WHERE tp.track_id = t.id AND p.owner_id IS NOT NULL
+        \\        AND (p.visibility = 'public' OR p.owner_id = $1::uuid
+        \\            OR EXISTS (SELECT 1 FROM musica.playlist_members m
+        \\                WHERE m.playlist_id = p.id AND m.user_id = $1::uuid))
+        \\        ORDER BY (p.owner_id = $1::uuid) DESC, p.id
+        \\        LIMIT 1
+        \\    ) accessible ON true
+        \\    WHERE u.kind = 'user' AND t.status IN ('ready', 'streamed')
+        \\    AND NOT EXISTS (
+        \\        SELECT 1 FROM jsonb_array_elements_text($2::jsonb) AS words(word)
+        \\        WHERE strpos(lower(t.title || ' ' || t.artist), lower(words.word)) = 0)
+        \\    ORDER BY lower(t.title), lower(t.artist), t.id
+        \\    LIMIT 25
+        \\) result
+    ;
+    const body = (try conn.queryText(arena, query, .{ user, words })) orelse return error.DatabaseUnavailable;
+
+    return std.json.parseFromSliceLeaky([]const tracks_model.LibraryMatch, arena, body, .{}) catch error.DatabaseUnavailable;
+}
+
+/// Создаёт личный pending-трек с предполагаемым S3-путём; возвращает ID без привязки к плейлистам.
+pub fn create(
+    conn: *database.Connection,
+    arena: std.mem.Allocator,
+    user: []const u8,
+    bucket: []const u8,
+    input: tracks_model.CreateTrack,
+) ![36]u8 {
+    const create_query =
+        \\WITH new_track AS (
+        \\    SELECT gen_random_uuid() AS id) INSERT INTO musica.tracks(id, title, artist, owner_id,
+        \\    storage_bucket, object_key)
+        \\SELECT n.id, $1, $2, $3, $4,
+    ++ source_key_sql ++
+        \\ FROM new_track n
+        \\RETURNING id::text
+    ;
+
+    const id = (try conn.queryText(
+        arena,
+        create_query,
+        .{ input.title, input.artist, user, bucket },
+    )) orelse return error.DatabaseUnavailable;
+    if (!tracks_model.isValidId(id)) return error.DatabaseUnavailable;
+    return id[0..36].*;
+}
+
 /// Блокирует строку трека и возвращает ID и тип владельца; иначе TrackNotFound.
 pub fn lockOwner(conn: *database.Connection, arena: std.mem.Allocator, id: []const u8) !tracks_model.Owner {
     const query =
@@ -16,44 +86,6 @@ pub fn lockOwner(conn: *database.Connection, arena: std.mem.Allocator, id: []con
     const body = (try conn.queryText(arena, query, .{id})) orelse return error.TrackNotFound;
 
     return std.json.parseFromSliceLeaky(tracks_model.Owner, arena, body, .{});
-}
-
-/// Создаёт pending-трек с предполагаемым S3-путём и привязывает к Uploads; возвращает ID.
-pub fn create(
-    conn: *database.Connection,
-    arena: std.mem.Allocator,
-    user: []const u8,
-    bucket: []const u8,
-    input: tracks_model.CreateTrack,
-) ![36]u8 {
-    const create_query =
-        \\WITH new_track AS (
-        \\    SELECT gen_random_uuid() AS id) INSERT INTO musica.tracks(id, title, artist, owner_id,
-        \\    storage_bucket, object_key)
-        \\SELECT id, $1, $2, $3, $4, 'tracks/' || id::text || '/source'
-        \\FROM new_track
-        \\RETURNING id::text
-    ;
-
-    const id = (try conn.queryText(
-        arena,
-        create_query,
-        .{ input.title, input.artist, user, bucket },
-    )) orelse return error.DatabaseUnavailable;
-    if (!tracks_model.isValidId(id)) return error.DatabaseUnavailable;
-    const result = id[0..36].*;
-
-    const link_query =
-        \\INSERT INTO musica.track_playlists(track_id, playlist_id)
-        \\SELECT $1, id
-        \\FROM musica.playlists
-        \\WHERE owner_id = $2
-        \\AND is_default
-    ;
-
-    if (try conn.exec(link_query, .{ &result, user }) != 1)
-        return error.DatabaseUnavailable;
-    return result;
 }
 
 /// Блокирует трек владельца без ожидания и возвращает расположение исходника и HLS.
@@ -174,7 +206,10 @@ pub fn readArtwork(
         \\SELECT json_build_object('bucket', t.storage_bucket, 'key', t.artwork_key)::text
         \\FROM musica.tracks t
         \\WHERE t.id = $1 AND t.owner_id IS NOT NULL AND t.artwork_key IS NOT NULL
-        \\AND (t.owner_id = $2::uuid OR EXISTS (
+        \\AND (t.owner_id = $2::uuid
+        \\    OR ($2::uuid IS NOT NULL AND EXISTS (
+        \\        SELECT 1 FROM musica.users u WHERE u.id = t.owner_id AND u.kind = 'system'))
+        \\    OR EXISTS (
         \\    SELECT 1 FROM musica.track_playlists tp
         \\    JOIN musica.playlists p ON p.id = tp.playlist_id
         \\    WHERE tp.track_id = t.id AND p.owner_id IS NOT NULL

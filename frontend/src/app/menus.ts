@@ -78,13 +78,15 @@ async function copyShareLink(app: Application, playlist: PlaylistSummary): Promi
 }
 export function webTrackMenu(app: Application, track: SearchTrack): MenuItem[] {
   const { t } = app.language;
-  const targets = app.library.items.filter((playlist) => playlist.role !== 'viewer');
+  const targets = app.library.items.filter(
+    (playlist) => playlist.role !== 'viewer' && !playlist.is_default,
+  );
   return [
     {
-      label: t('player.play'),
-      icon: 'play',
-      group: 'playback',
-      action: () => app.run(app.playWebTrack(track)),
+      label: t('web.addToUploads'),
+      icon: 'plus',
+      group: 'organize',
+      action: () => app.run(app.addWebTrack(track)),
     },
     {
       label: t('tracks.addToPlaylist'),
@@ -98,18 +100,40 @@ export function webTrackMenu(app: Application, track: SearchTrack): MenuItem[] {
       })),
     },
     {
-      label: t('web.copySourceLink'),
+      label: t('web.openSource'),
       icon: 'link',
       group: 'sharing',
       disabled: !track.source_url,
-      action: () =>
-        app.run(
-          (async () => {
-            if (!track.source_url) return;
-            await copyText(track.source_url);
-            app.notify(t('share.copied'));
-          })(),
-        ),
+      action: () => {
+        if (track.source_url) window.open(track.source_url, '_blank', 'noopener,noreferrer');
+      },
+    },
+  ];
+}
+
+export function serviceTrackMenu(app: Application, track: Track): MenuItem[] {
+  const { t } = app.language;
+  const targets = app.library.items.filter(
+    (playlist) => playlist.role !== 'viewer' && !playlist.is_default,
+  );
+  return [
+    {
+      label: t('web.addToUploads'),
+      icon: 'plus',
+      group: 'organize',
+      disabled: !!app.search.serviceAdditions[track.id],
+      action: () => app.run(app.addServiceTrack(track)),
+    },
+    {
+      label: t('tracks.addToPlaylist'),
+      icon: 'plus',
+      group: 'organize',
+      disabled: !targets.length,
+      children: targets.map((playlist) => ({
+        label: playlist.title,
+        icon: 'library',
+        action: () => app.run(app.addServiceTrack(track, playlist.id)),
+      })),
     },
   ];
 }
@@ -156,7 +180,9 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
       group: 'organize',
       id: 'attach-track',
       disabled:
-        !app.auth.user || (!track.shared && track.owner_id !== app.auth.user.id) || !targets.length,
+        !app.auth.user ||
+        (track.owner_kind !== 'system' && track.owner_id !== app.auth.user.id) ||
+        !targets.length,
       children: targets.map((target) => ({
         label: target.title,
         icon: 'library',
@@ -182,7 +208,7 @@ export function trackMenu(app: Application, track: Track): MenuItem[] {
         app.confirmation = {
           title: deletesTrack ? t('tracks.deleteTitle') : t('tracks.removeTitle'),
           description:
-            playlist.is_default && track.shared
+            playlist.is_default && track.owner_kind === 'system'
               ? t('tracks.removeSharedDescription', { title: track.title })
               : deletesTrack
                 ? t('tracks.deleteDescription', { title: track.title })

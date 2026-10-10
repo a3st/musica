@@ -17,6 +17,11 @@ pub const Config = struct {
     metadata_timeout_seconds: u32,
     ytdlp_path: []const u8,
 
+    /// Разрешает маршруты Web и запуск общего worker скачивания.
+    web_int_enabled: bool,
+    /// Разрешает импорт Spotify; при выключенном Web принудительно становится false.
+    spotify_int_enabled: bool,
+
     spotify_tmp_dir: []const u8,
     spotify_worker_enabled: bool,
     spotify_timeout_seconds: u32,
@@ -36,7 +41,7 @@ pub const Config = struct {
     /// Читает окружение, подставляет значения по умолчанию и проверяет ограничения.
     /// Учётные данные стартового администратора должны быть заданы вместе; пустая пара отключает создание.
     pub fn load(env: *const std.process.Environ.Map) !Config {
-        const config: Config = .{
+        var config: Config = .{
             .http_address = try loadHttpAddress(env),
             .database = try database.Settings.load(env),
             .s3 = try s3.Settings.load(env),
@@ -48,6 +53,9 @@ pub const Config = struct {
             .metadata_worker_enabled = try parseBoolean(env.get("TRACK_METADATA_WORKER_ENABLED") orelse "true"),
             .metadata_timeout_seconds = try std.fmt.parseInt(u32, env.get("TRACK_METADATA_TIMEOUT_SECONDS") orelse "120", 10),
             .ytdlp_path = env.get("YTDLP_PATH") orelse "yt-dlp",
+
+            .web_int_enabled = try parseBoolean(env.get("WEB_INT_ENABLED") orelse "true"),
+            .spotify_int_enabled = try parseBoolean(env.get("SPOTIFY_INT_ENABLED") orelse "true"),
 
             .spotify_tmp_dir = env.get("SPOTIFY_TMP_DIR") orelse env.get("TEMP") orelse "/tmp/musica-spotify",
             .spotify_worker_enabled = try parseBoolean(env.get("SPOTIFY_WORKER_ENABLED") orelse "true"),
@@ -87,6 +95,11 @@ pub const Config = struct {
             config.metadata_timeout_seconds == 0 or config.metadata_timeout_seconds > 3600)
             return error.InvalidConfiguration;
 
+        if (!config.web_int_enabled and config.spotify_int_enabled) {
+            std.log.warn("SPOTIFY_INT_ENABLED requires WEB_INT_ENABLED; disabling Spotify integration", .{});
+            config.spotify_int_enabled = false;
+        }
+
         return config;
     }
 };
@@ -113,6 +126,30 @@ fn loadHttpAddress(env: *const std.process.Environ.Map) !std.Io.net.IpAddress {
 
     return std.Io.net.IpAddress.parse(env.get("HTTP_HOST") orelse "127.0.0.1", port) catch
         error.InvalidConfiguration;
+}
+
+test "Spotify is disabled when Web is disabled and integration flags reject invalid values" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    try env.put("DB_PASSWORD", "fixture-db-password");
+    try env.put("S3_ACCESS_KEY_ID", "fixture-access");
+    try env.put("S3_SECRET_ACCESS_KEY", "fixture-secret");
+    try env.put("WEB_INT_ENABLED", "false");
+    try env.put("SPOTIFY_INT_ENABLED", "true");
+
+    const disabled = try Config.load(&env);
+    try std.testing.expect(!disabled.web_int_enabled);
+    try std.testing.expect(!disabled.spotify_int_enabled);
+
+    try env.put("WEB_INT_ENABLED", "true");
+    try env.put("SPOTIFY_INT_ENABLED", "false");
+    const web_only = try Config.load(&env);
+    try std.testing.expect(web_only.web_int_enabled);
+    try std.testing.expect(!web_only.spotify_int_enabled);
+
+    try env.put("SPOTIFY_INT_ENABLED", "yes");
+    try std.testing.expectError(error.InvalidConfiguration, Config.load(&env));
 }
 
 test "bootstrap admin accepts an empty pair and rejects incomplete credentials" {

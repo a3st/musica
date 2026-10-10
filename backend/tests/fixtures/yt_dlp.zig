@@ -12,6 +12,8 @@ pub fn main(init: std.process.Init) !void {
         .sub_path = "source.mp3",
         .data = "ID3-offline-spotify-audio-fixture",
     });
+    // Match yt-dlp stopping after the first successful --max-downloads result.
+    std.process.exit(101);
 }
 
 /// Проверяет параметры MP3, обложки, FFmpeg и фиксированного имени выходного файла.
@@ -37,7 +39,7 @@ fn validateArguments(args: []const []const u8) !void {
     }
 
     if (!bitrate or !thumbnail or !ffmpeg or !output or
-        !std.mem.startsWith(u8, args[args.len - 1], "ytsearch1:")) return error.InvalidArguments;
+        !std.mem.startsWith(u8, args[args.len - 1], "ytsearch5:")) return error.InvalidArguments;
 }
 
 /// Ожидает go или fail из управляющего файла; временный буфер освобождается на каждой итерации.

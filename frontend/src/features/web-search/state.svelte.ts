@@ -2,10 +2,12 @@ import { webSearchApi } from './api';
 import { errorMessage } from '../../shared/api/errors';
 import type { SearchTrack } from './model';
 import { searchTrackKey } from './model';
+import type { Track } from '../tracks/model';
 
 export class WebSearchState {
   query = $state('');
   tracks = $state<SearchTrack[]>([]);
+  library = $state<Track[]>([]);
   loading = $state(false);
   searched = $state(false);
   error = $state('');
@@ -23,6 +25,7 @@ export class WebSearchState {
     this.cancelSearch();
     this.query = query;
     this.tracks = [];
+    this.library = [];
     this.searched = false;
     this.error = '';
   }
@@ -38,9 +41,13 @@ export class WebSearchState {
     this.searched = true;
     this.error = '';
     this.tracks = [];
+    this.library = [];
     try {
-      const tracks = await webSearchApi.search(query, controller.signal);
-      if (version === this.version) this.tracks = tracks;
+      const result = await webSearchApi.search(query, controller.signal);
+      if (version === this.version) {
+        this.library = result.library;
+        this.tracks = result.catalog;
+      }
     } catch (error) {
       if (version === this.version && !controller.signal.aborted) this.error = errorMessage(error);
     } finally {
@@ -63,6 +70,15 @@ export class WebSearchState {
       })
       .catch(() => {});
     return promise;
+  }
+
+  /** Готовит общий трек для плеера, не добавляя его в личную библиотеку. */
+  prepare(track: SearchTrack, signal: AbortSignal): Promise<string> {
+    return webSearchApi.add(
+      track,
+      AbortSignal.any([signal, this.additionsController.signal]),
+      false,
+    );
   }
 
   private async addTrack(track: SearchTrack, signal?: AbortSignal): Promise<string> {
@@ -97,6 +113,7 @@ export class WebSearchState {
     this.additionsController = new AbortController();
     this.query = '';
     this.tracks = [];
+    this.library = [];
     this.searched = false;
     this.error = '';
     this.additions = {};

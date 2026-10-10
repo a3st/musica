@@ -1,5 +1,4 @@
-import { playlistsApi } from '../playlists/api';
-import type { Playlist, PlaylistSummary } from '../playlists/model';
+import { tracksApi } from '../tracks/api';
 import type { Track } from '../tracks/model';
 import type { SearchTrack } from '../web-search/model';
 import { searchTrackKey } from '../web-search/model';
@@ -12,9 +11,11 @@ export interface LocalResult {
 }
 
 export type RecentResult =
-  { kind: 'local'; result: LocalResult } | { kind: 'web'; track: SearchTrack };
+  | { kind: 'local'; result: LocalResult }
+  | { kind: 'service'; track: Track }
+  | { kind: 'web'; track: SearchTrack };
 
-/** Searches the accessible library before consulting the external catalog. */
+/** Ищет пользовательские треки в доступных плейлистах, затем сервисные треки и каталог. */
 export class SearchState {
   readonly web: WebSearchState;
   query = $state('');
@@ -23,17 +24,15 @@ export class SearchState {
   searched = $state(false);
   error = $state('');
   local = $state<LocalResult[]>([]);
+  service = $state<Track[]>([]);
+  serviceAdditions = $state<Record<string, 'adding' | 'added'>>({});
   recent = $state<RecentResult[]>([]);
   private timer?: ReturnType<typeof setTimeout>;
   private controller?: AbortController;
   private version = 0;
 
   constructor(
-    private readonly library: () => {
-      items: PlaylistSummary[];
-      selected: Playlist | null;
-      canSearchWeb: boolean;
-    },
+    private readonly canSearchWeb: () => boolean,
     refresh: () => Promise<void>,
   ) {
     this.web = new WebSearchState(refresh);
@@ -44,6 +43,7 @@ export class SearchState {
     this.query = query;
     this.open = true;
     this.local = [];
+    this.service = [];
     this.error = '';
     this.searched = false;
     this.web.setQuery(query);
@@ -62,40 +62,22 @@ export class SearchState {
     this.searched = true;
     this.error = '';
     this.local = [];
+    this.service = [];
     this.web.setQuery(query);
     const version = this.version;
     const controller = new AbortController();
     this.controller = controller;
 
     try {
-      const { items, selected, canSearchWeb } = this.library();
-      const playlists: Playlist[] = selected ? [selected] : [];
-      const remaining = items.filter((item) => item.id !== selected?.id);
-      let index = 0;
-      // Bound concurrent requests; a failed library read must not become a false catalog miss.
-      await Promise.all(
-        Array.from({ length: Math.min(4, remaining.length) }, async () => {
-          while (index < remaining.length && !controller.signal.aborted) {
-            const item = remaining[index++];
-            playlists.push(await playlistsApi.playlist(item.id, controller.signal));
-          }
-        }),
-      );
+      if (query.length < 2 || new TextEncoder().encode(query).length > 256) return;
+      const matches = await tracksApi.searchLibrary(query, controller.signal);
       if (version !== this.version) return;
-
-      const words = query.toLocaleLowerCase().split(/\s+/);
-      const seen = new Set<string>();
-      const matches: LocalResult[] = [];
-      for (const playlist of playlists) {
-        for (const track of playlist.tracks) {
-          const text = `${track.title} ${track.artist}`.toLocaleLowerCase();
-          if (seen.has(track.id) || !words.every((word) => text.includes(word))) continue;
-          seen.add(track.id);
-          matches.push({ track, playlistId: playlist.id });
-        }
-      }
       this.local = matches;
-      if (!matches.length && query.length >= 2 && canSearchWeb) await this.web.search();
+      if (!matches.length && this.canSearchWeb()) {
+        await this.web.search();
+        if (version !== this.version) return;
+        this.service = this.web.library;
+      }
     } catch (error) {
       if (version === this.version && !controller.signal.aborted) {
         this.error = errorMessage(error);
@@ -108,7 +90,9 @@ export class SearchState {
 
   remember(result: RecentResult): void {
     const key = (item: RecentResult) =>
-      item.kind === 'local' ? `local:${item.result.track.id}` : `web:${searchTrackKey(item.track)}`;
+      item.kind === 'web'
+        ? `web:${searchTrackKey(item.track)}`
+        : `track:${item.kind === 'local' ? item.result.track.id : item.track.id}`;
     this.recent = [result, ...this.recent.filter((item) => key(item) !== key(result))].slice(0, 8);
   }
 
@@ -133,6 +117,8 @@ export class SearchState {
     this.web.reset();
     this.query = '';
     this.local = [];
+    this.service = [];
+    this.serviceAdditions = {};
     this.recent = [];
     this.error = '';
     this.searched = false;

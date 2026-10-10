@@ -22,6 +22,8 @@ pub fn read(
         \\WHERE t.id = $1
         \\AND t.owner_id IS NOT NULL
         \\AND (t.owner_id = $2::uuid
+        \\    OR ($2::uuid IS NOT NULL AND EXISTS (
+        \\        SELECT 1 FROM musica.users u WHERE u.id = t.owner_id AND u.kind = 'system'))
         \\    OR EXISTS (
         \\        SELECT 1
         \\        FROM musica.track_playlists tp

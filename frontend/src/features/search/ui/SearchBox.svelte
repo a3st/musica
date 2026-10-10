@@ -4,6 +4,7 @@
   import CollectionScrollbar from '../../../shared/ui/CollectionScrollbar.svelte';
   import type { SearchState, LocalResult, RecentResult } from '../state.svelte';
   import type { SearchTrack } from '../../web-search/model';
+  import type { Track } from '../../tracks/model';
   import { searchTrackKey } from '../../web-search/model';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   import './SearchBox.css';
@@ -15,8 +16,12 @@
     add,
     playWeb,
     menu,
+    playService,
+    addService,
+    serviceMenu,
     ownsContextMenu = false,
     waitingTrackKey = null,
+    waitingServiceId = null,
   }: {
     state: SearchState;
     language: LanguageState;
@@ -24,8 +29,12 @@
     add: (track: SearchTrack) => void;
     playWeb: (track: SearchTrack) => void;
     menu: (track: SearchTrack, origin: HTMLElement) => void;
+    playService: (track: Track) => void;
+    addService: (track: Track) => void;
+    serviceMenu: (track: Track, origin: HTMLElement) => void;
     ownsContextMenu?: boolean;
     waitingTrackKey?: string | null;
+    waitingServiceId?: string | null;
   } = $props();
   let container: HTMLDivElement;
   let input: HTMLInputElement;
@@ -36,7 +45,10 @@
       ? controller.recent
       : controller.local.length
         ? controller.local.map((result) => ({ kind: 'local' as const, result }))
-        : controller.web.tracks.map((track) => ({ kind: 'web' as const, track })),
+        : [
+            ...controller.service.map((track) => ({ kind: 'service' as const, track })),
+            ...controller.web.tracks.map((track) => ({ kind: 'web' as const, track })),
+          ],
   );
   const error = $derived(controller.error || controller.web.error);
 
@@ -81,6 +93,7 @@
 
   function activate(result: RecentResult): void {
     if (result.kind === 'local') play(result.result);
+    else if (result.kind === 'service') playService(result.track);
     else {
       controller.remember(result);
       playWeb(result.track);
@@ -167,17 +180,19 @@
         </div>
       {:else if results.length}
         <ul class="search-results-list">
-          {#each results as result (result.kind === 'local' ? result.result.track.id : searchTrackKey(result.track))}
+          {#each results as result (result.kind === 'web' ? searchTrackKey(result.track) : result.kind === 'local' ? result.result.track.id : result.track.id)}
             {@const track = result.kind === 'local' ? result.result.track : result.track}
+            {@const waiting =
+              result.kind === 'web'
+                ? waitingTrackKey === searchTrackKey(result.track)
+                : result.kind === 'service' && waitingServiceId === result.track.id}
             <li class="search-result" data-source={result.kind}>
               <button
                 class="search-result-art"
-                disabled={result.kind === 'local'
-                  ? result.result.track.status === 'pending'
-                  : waitingTrackKey === searchTrackKey(result.track)}
+                disabled={waiting ||
+                  (result.kind === 'local' && result.result.track.status === 'pending')}
                 aria-label={language.t('tracks.play', { title: track.title })}
-                aria-busy={result.kind === 'web' &&
-                  waitingTrackKey === searchTrackKey(result.track)}
+                aria-busy={waiting}
                 onclick={() => activate(result)}
               >
                 {#if result.kind === 'web' && result.track.artwork_url}
@@ -189,18 +204,19 @@
                   />
                 {:else if result.kind === 'local'}
                   <TrackArtwork track={result.result.track} />
+                {:else if result.kind === 'service'}
+                  <TrackArtwork track={result.track} />
                 {:else}<Icon name="music" />{/if}
                 <span class="search-art-play">
-                  {#if result.kind === 'web' && waitingTrackKey === searchTrackKey(result.track)}
+                  {#if waiting}
                     <span class="spinner"></span>
                   {:else}<Icon name="play" />{/if}
                 </span>
               </button>
               <button
                 class="search-result-action"
-                disabled={result.kind === 'local'
-                  ? result.result.track.status === 'pending'
-                  : waitingTrackKey === searchTrackKey(result.track)}
+                disabled={waiting ||
+                  (result.kind === 'local' && result.result.track.status === 'pending')}
                 aria-label={language.t('tracks.play', {
                   title: track.title,
                 })}
@@ -210,11 +226,15 @@
                   <strong>{track.title}</strong>
                   <span
                     >{track.artist} · {language.t(
-                      result.kind === 'local' ? 'search.library' : 'search.itunes',
+                      result.kind === 'local'
+                        ? 'search.library'
+                        : result.kind === 'service'
+                          ? 'search.service'
+                          : 'search.itunes',
                     )}</span
                   >
                 </span>
-                {#if result.kind === 'local'}
+                {#if result.kind !== 'web'}
                   <Icon name="play" />
                 {/if}
               </button>
@@ -247,6 +267,33 @@
                         ? 'check'
                         : 'plus'}
                     />{/if}
+                </button>
+              {:else if result.kind === 'service'}
+                <button
+                  class="icon-button search-result-more"
+                  data-search-menu={result.track.id}
+                  aria-haspopup="menu"
+                  aria-label={language.t('tracks.actions', { title: track.title })}
+                  onclick={(event) => serviceMenu(result.track, event.currentTarget)}
+                  ><Icon name="more" /></button
+                >
+                <button
+                  class="icon-button search-result-add"
+                  disabled={!!controller.serviceAdditions[result.track.id]}
+                  aria-label={controller.serviceAdditions[result.track.id] === 'added'
+                    ? language.t('web.added')
+                    : language.t('web.addTrack', { title: track.title })}
+                  onclick={() => addService(result.track)}
+                >
+                  {#if controller.serviceAdditions[result.track.id] === 'adding'}
+                    <span class="spinner"></span>
+                  {:else}
+                    <Icon
+                      name={controller.serviceAdditions[result.track.id] === 'added'
+                        ? 'check'
+                        : 'plus'}
+                    />
+                  {/if}
                 </button>
               {/if}
             </li>

@@ -35,8 +35,12 @@
     play={(result) => app.run(app.playSearchResult(result))}
     playWeb={(track) => app.run(app.playWebTrack(track))}
     menu={(track, origin) => app.showWebTrackMenu(track, origin)}
+    playService={(track) => app.run(app.playServiceTrack(track))}
+    addService={(track) => app.run(app.addServiceTrack(track))}
+    serviceMenu={(track, origin) => app.showServiceTrackMenu(track, origin)}
     ownsContextMenu={!!app.menu.origin?.hasAttribute('data-search-menu')}
     waitingTrackKey={app.player.value.loading ? app.search.web.playingTrackKey : null}
+    waitingServiceId={app.player.value.loading ? app.player.value.current?.id : null}
     add={(track) => {
       app.run(app.addWebTrack(track));
     }}

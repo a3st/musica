@@ -7,12 +7,24 @@ const auth_service = @import("../auth/service.zig");
 const auth_model = @import("../auth/model.zig");
 const api = @import("../../helpers/api.zig");
 
-/// Регистрирует маршруты создания, загрузки файла, чтения обложки и удаления трека.
+/// Регистрирует поиск пользовательских треков, создание, загрузку, чтение обложки и удаление.
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
+    router.get("/api/tracks/search", searchLibrary, .{});
     router.post("/api/tracks", create, .{});
     router.put("/api/tracks/:id/file", upload, .{});
     router.delete("/api/tracks/:id", remove, .{});
     router.get("/api/tracks/:id/artwork", artwork, .{});
+}
+
+/// Возвращает пользовательские треки с плейлистами, доступными текущему пользователю.
+fn searchLibrary(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
+    const user = auth_service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
+    const params = req.query() catch return api.failure(res, error.InvalidInput);
+    const query = params.get("q") orelse return api.failure(res, error.InvalidInput);
+    const matches = service.searchLibrary(app, res.arena, user, query) catch |err| return api.failure(res, err);
+
+    res.header("Cache-Control", "no-store");
+    try res.json(.{ .tracks = matches }, .{});
 }
 
 /// Выдаёт JPEG с проверкой доступа через сессию или share_token; приватные ответы не кешируются.
@@ -172,6 +184,11 @@ test "valid track creation and upload require a session" {
     try upload(&app, file.req, file.res);
 
     try file.expectStatus(401);
+
+    var search = httpz.testing.init(.{});
+    defer search.deinit();
+    try searchLibrary(&app, search.req, search.res);
+    try search.expectStatus(401);
 }
 
 test "shared API helpers preserve track error codes and the 16 KiB JSON limit" {

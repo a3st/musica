@@ -1,7 +1,33 @@
 import { record, uuid } from '../../shared/api/validation';
 import { request, json } from '../../shared/api/client';
-import { hlsState, type HlsState } from './model';
+import { hlsState, track, type HlsState, type Track } from './model';
+import { t } from '../../shared/i18n';
+
+export interface LibraryMatch {
+  track: Track;
+  playlistId: string;
+}
+
 export const tracksApi = {
+  async searchLibrary(query: string, signal: AbortSignal): Promise<LibraryMatch[]> {
+    const result = record(
+      await request('/tracks/search?q=' + encodeURIComponent(query), {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
+      }),
+    );
+    if (!Array.isArray(result.tracks) || result.tracks.length > 25)
+      throw new Error(t('errors.invalidData'));
+    const ids = new Set<string>();
+    return result.tracks.map((value) => {
+      const row = record(value);
+      const item = track(row.track);
+      if (item.owner_kind !== 'user' || item.status === 'pending' || ids.has(item.id))
+        throw new Error(t('errors.invalidData'));
+      ids.add(item.id);
+      return { track: item, playlistId: uuid(row.playlist_id) };
+    });
+  },
+
   async createTrack(title: string, artist: string, playlistIds: string[]): Promise<string> {
     return uuid(
       record(
