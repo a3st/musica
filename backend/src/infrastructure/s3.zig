@@ -150,6 +150,15 @@ pub const S3 = struct {
     }
 
     fn receive(self: *S3, url: []const u8, host: []const u8, signed: Signed, timestamp: []const u8, writer: *std.Io.Writer) anyerror!void {
+        self.receiveOnce(url, host, signed, timestamp, writer) catch |err| {
+            if (err != error.HttpConnectionClosing) return err;
+            // No response headers or body arrived; the failed connection was discarded.
+            std.log.debug("S3 GetObject connection closed before response; retrying once", .{});
+            try self.receiveOnce(url, host, signed, timestamp, writer);
+        };
+    }
+
+    fn receiveOnce(self: *S3, url: []const u8, host: []const u8, signed: Signed, timestamp: []const u8, writer: *std.Io.Writer) anyerror!void {
         const result = try self.client.fetch(.{
             .location = .{ .url = url },
             .method = .GET,
@@ -173,6 +182,15 @@ pub const S3 = struct {
     }
 
     fn send(self: *S3, url: []const u8, host: []const u8, mime: []const u8, data: []const u8, signed: Signed, timestamp: []const u8, method: std.http.Method) anyerror!void {
+        self.sendOnce(url, host, mime, data, signed, timestamp, method) catch |err| {
+            if (err != error.HttpConnectionClosing) return err;
+            // PUT of the same bytes/key and DELETE are idempotent. Keep the original deadline.
+            std.log.debug("S3 {s} connection closed before response; retrying once", .{@tagName(method)});
+            try self.sendOnce(url, host, mime, data, signed, timestamp, method);
+        };
+    }
+
+    fn sendOnce(self: *S3, url: []const u8, host: []const u8, mime: []const u8, data: []const u8, signed: Signed, timestamp: []const u8, method: std.http.Method) anyerror!void {
         var request = try self.client.request(method, try std.Uri.parse(url), .{
             .redirect_behavior = .unhandled,
             .keep_alive = true,
@@ -497,6 +515,85 @@ fn required(env: *const std.process.Environ.Map, name: []const u8) ![]const u8 {
     };
     if (value.len == 0) return error.InvalidConfiguration;
     return value;
+}
+
+fn readStorageRequest(reader: *std.Io.Reader, method: std.http.Method) !void {
+    const line = (try reader.takeDelimiter('\n')) orelse return error.EndOfStream;
+    try std.testing.expect(std.mem.startsWith(u8, line, @tagName(method)));
+    while (true) {
+        const header = (try reader.takeDelimiter('\n')) orelse return error.EndOfStream;
+        if (std.mem.eql(u8, header, "\r")) break;
+    }
+    if (method == .PUT) {
+        var payload: [4]u8 = undefined;
+        try reader.readSliceAll(&payload);
+        try std.testing.expectEqualStrings("test", &payload);
+    }
+}
+
+// Return a reusable connection, then close it without replying to the next request.
+fn closingStorage(io: std.Io, server: *std.Io.net.Server, method: std.http.Method, close_retry: bool) !void {
+    {
+        const stream = try server.accept(io);
+        defer stream.close(io);
+        var read_buffer: [4096]u8 = undefined;
+        var reader = stream.reader(io, &read_buffer);
+        var write_buffer: [256]u8 = undefined;
+        var writer = stream.writer(io, &write_buffer);
+        try readStorageRequest(&reader.interface, .PUT);
+        try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+        try writer.interface.flush();
+        try readStorageRequest(&reader.interface, method);
+    }
+    const stream = try server.accept(io);
+    defer stream.close(io);
+    var read_buffer: [4096]u8 = undefined;
+    var reader = stream.reader(io, &read_buffer);
+    try readStorageRequest(&reader.interface, method);
+    if (close_retry) return;
+    var write_buffer: [256]u8 = undefined;
+    var writer = stream.writer(io, &write_buffer);
+    try writer.interface.writeAll(switch (method) {
+        .GET => "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
+        .DELETE => "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        .PUT => "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        else => unreachable,
+    });
+    try writer.interface.flush();
+}
+
+test "S3 retries a closed keep-alive connection once for PUT GET DELETE" {
+    const io = std.testing.io;
+    for ([_]std.http.Method{ .PUT, .GET, .DELETE, .PUT }, 0..) |method, index| {
+        const address: std.Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 0 } };
+        var server = try address.listen(io, .{});
+        defer server.deinit(io);
+        const close_retry = index == 3;
+        var future = try io.concurrent(closingStorage, .{ io, &server, method, close_retry });
+        defer future.cancel(io) catch {};
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var storage = S3.init(io, std.testing.allocator, .{
+            .endpoint = try std.fmt.allocPrint(arena.allocator(), "http://127.0.0.1:{d}", .{server.socket.address.ip4.port}),
+            .region = "us-east-1",
+            .bucket = "uploads",
+            .access_key = "testaccess",
+            .secret_key = "test-secret",
+        });
+        defer storage.deinit();
+        storage.timeout_ms = 2_000;
+        try storage.put(arena.allocator(), "tracks/test", "audio/mpeg", "test");
+        switch (method) {
+            .PUT => {
+                const result = storage.put(arena.allocator(), "tracks/test", "audio/mpeg", "test");
+                if (close_retry) try std.testing.expectError(error.HttpConnectionClosing, result) else try result;
+            },
+            .GET => try std.testing.expectEqualStrings("test", try storage.get(arena.allocator(), "tracks/test", 4)),
+            .DELETE => try storage.delete(arena.allocator(), "tracks/test"),
+            else => unreachable,
+        }
+        try future.await(io);
+    }
 }
 
 pub fn validateEndpoint(endpoint: []const u8) !void {

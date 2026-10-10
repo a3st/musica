@@ -1,0 +1,26 @@
+.hero-cover img,
+.nav-cover img,
+.mini-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cover-art {
+  width: 100%;
+  height: 100%;
+  background: #071227 url('/artwork/waves.svg') center/cover;
+  position: relative;
+}
+:root[data-theme='light'] .cover-art {
+  background-image: url('/artwork/breeze.svg');
+}
+.cover-art > svg,
+.cover-art > span {
+  display: none;
+}
+.nav-cover .mix-art {
+  filter: hue-rotate(calc(var(--hue) * 1deg));
+}
+.hero-cover .cover-art {
+  border-radius: 8px;
+}

@@ -5,8 +5,23 @@ Musica — self-hosted музыкальный плеер. Репозиторий
 
 ## Стек и границы
 
-- Frontend: TypeScript в strict-режиме, Vite, PWA через vite-plugin-pwa.
-  Текущий каркас использует DOM API без UI-фреймворка.
+- Frontend: Svelte 5, TypeScript в strict-режиме, Vite, PWA через vite-plugin-pwa.
+  `src/app/` собирает приложение, `src/pages/` компонует страницы,
+  `src/features/` содержит фичи, `src/shared/` — общие независимые модули.
+  В фиче используйте `model.ts` для DTO и валидации, `api.ts` для запросов,
+  `state.svelte.ts` для реактивного состояния и `ui/` для компонентов.
+  Используйте runes Svelte 5; состояние приложения передавайте через context
+  или props, без глобальных экземпляров контроллеров и ручного рендера HTML.
+  Audio/HLS движок отделён от интерфейса; освобождайте слушатели, таймеры,
+  запросы и ресурсы при завершении соответствующего жизненного цикла.
+  Пишите CSS многострочными блоками. Стили компонентов размещайте рядом
+  с компонентом; общие переменные и базовые правила — в `shared/styles/`.
+  Порядок подключения внешних CSS задаётся в `app/styles.css`.
+  Переводы размещайте в `shared/i18n/locales/ru-RU.ts` и `en-US.ts`.
+  Используйте стабильные ключи (`uploads.title`) и именованные параметры
+  через `t('tracks.play', { title })`. Не используйте текст как ключ.
+  Английский словарь должен удовлетворять общему типу `Messages`;
+  проверяйте локализацию через `npm run test:i18n`.
 - Backend: Zig **0.16.0**, HTTP-сервер karlseguin/http.zig (модуль `httpz`).
   Используйте API Zig 0.16, включая `std.process.Init` и `std.Io`.
 - БД: PostgreSQL через pg.zig; файлы: MinIO через S3. Настройки передаются
@@ -61,6 +76,10 @@ Musica — self-hosted музыкальный плеер. Репозиторий
 ## Проверка изменений
 
 - Frontend: из `frontend/` выполните `npm ci`, затем `npm run build`.
+  Сборка включает `svelte-check`. Проверяйте формат через `npm run format:check`.
+  Для логики используйте `npm run test:player` и `npm run test:spotify`,
+  для интерфейса — `npm run test:ui`, для прокси — `npm run test:proxy`,
+  для production service worker — `npm run test:pwa`.
 - Backend: из `backend/` выполните `zig fmt --check build.zig src`, затем `zig build`.
   Для логики backend запускайте также `zig build test`.
 - Для изменений HTTP запускайте `zig build run` и проверяйте затронутые маршруты.

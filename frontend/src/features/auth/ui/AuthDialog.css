@@ -1,0 +1,37 @@
+.auth-dialog h2 span {
+  color: var(--accent);
+}
+.auth-dialog {
+  padding: 36px;
+  max-width: 440px;
+}
+.auth-dialog h2 {
+  font-size: 36px;
+  letter-spacing: -1.6px;
+  line-height: 1.15;
+  margin: 20px 0;
+}
+.auth-dialog .muted {
+  margin-bottom: 28px;
+}
+.auth-dialog .dialog-heading {
+  margin: 0;
+}
+.auth-dialog .eyebrow {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  margin-top: 6px;
+}
+.auth-switch {
+  margin: 24px auto 0;
+  display: block;
+  color: var(--accent) !important;
+}
+@media (max-width: 760px) {
+  .auth-dialog {
+    padding: 25px;
+  }
+  .auth-dialog h2 {
+    font-size: 31px;
+  }
+}

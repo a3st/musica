@@ -1,0 +1,30 @@
+import { english } from './locales/en-US';
+import { russian } from './locales/ru-RU';
+import type { Locale, MessageKey, TranslationArgs } from './types';
+
+export type { Locale, MessageKey, Messages, TranslationArgs } from './types';
+
+let currentLocale: Locale = 'ru-RU';
+export function setTranslationLocale(locale: Locale): void {
+  currentLocale = locale;
+}
+
+export function translate<Key extends MessageKey>(
+  key: Key,
+  locale: Locale,
+  ...args: TranslationArgs<Key>
+): string {
+  const message = (locale === 'en-US' ? english : russian)[key];
+  const params = args[0] as Record<string, string | number> | undefined;
+  return message.replace(/\{([^{}]+)\}/g, (_, name: string) =>
+    String(params?.[name] ?? `{${name}}`),
+  );
+}
+
+export function createTranslator(locale: () => Locale) {
+  return <Key extends MessageKey>(key: Key, ...args: TranslationArgs<Key>): string =>
+    translate(key, locale(), ...args);
+}
+
+// Non-component code uses the current language; UI reads reactive LanguageState.
+export const t = createTranslator(() => currentLocale);

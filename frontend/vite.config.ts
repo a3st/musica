@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 export default defineConfig({
   preview: { proxy: {} },
@@ -12,6 +13,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    svelte(),
     VitePWA({
       registerType: 'prompt',
       includeAssets: ['icon.svg'],

@@ -5,16 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "check": "tsc --noEmit",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
     "build": "npm run check && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:ui": "node tests/ui.mjs",
-    "test:spotify": "node tests/spotify.mjs",
-    "test:pwa": "node tests/pwa.mjs",
-    "test:proxy": "node tests/proxy.mjs"
+    "test:ui": "node tests/e2e/ui.mjs",
+    "test:spotify": "node tests/unit/spotify.mjs",
+    "test:pwa": "node tests/e2e/pwa.mjs",
+    "test:proxy": "node tests/integration/proxy.mjs",
+    "format": "prettier --write src vite.config.ts svelte.config.js",
+    "format:check": "prettier --check src vite.config.ts svelte.config.js",
+    "test:player": "node tests/unit/player.mjs",
+    "test:i18n": "node tests/unit/i18n.mjs"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "playwright": "1.58.2",
+    "prettier": "^3.9.9",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
     "vite-plugin-pwa": "^1.0.3"

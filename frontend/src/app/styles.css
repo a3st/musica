@@ -1,0 +1,17 @@
+/* Shared foundations, panel layout, then styles owned by each feature. */
+@import '../shared/styles/tokens.css';
+@import '../shared/styles/base.css';
+@import '../app/layout/layout.css';
+@import '../app/layout/Sidebar.css';
+@import '../shared/ui/Brand.css';
+@import '../features/playlists/ui/PlaylistNav.css';
+@import '../app/layout/TopBar.css';
+@import '../features/playlists/ui/PlaylistHeader.css';
+@import '../features/playlists/ui/CoverArt.css';
+@import '../features/tracks/ui/TrackTable.css';
+@import '../features/auth/ui/AuthDialog.css';
+@import '../features/player/ui/PlayerBar.css';
+@import '../features/uploads/ui/UploadDialog.css';
+@import '../features/player/ui/QueuePanel.css';
+@import '../features/playlists/ui/PlaylistEditor.css';
+@import '../shared/ui/CollectionScrollbar.css';
