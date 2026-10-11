@@ -8,6 +8,16 @@ export class UploadsState {
   busy = $state(false);
   queue = $state<UploadItem[]>([]);
   open = $state(false);
+  private scheduled = new Set<number>();
+
+  dismiss(): void {
+    this.open = false;
+    this.queue = this.queue.filter(
+      (item) =>
+        this.scheduled.has(item.key) || item.state === 'uploading' || item.state === 'preparing',
+    );
+  }
+
   private key = 0;
   private generation = 0;
   constructor(
@@ -24,6 +34,7 @@ export class UploadsState {
   reset(): void {
     this.generation++;
     for (const item of this.queue) item.controller?.abort();
+    this.scheduled.clear();
     this.queue = [];
     this.busy = false;
     this.open = false;
@@ -81,10 +92,13 @@ export class UploadsState {
     }
     const generation = this.generation;
     this.busy = true;
+    const batch = this.queue.filter((item) => item.state === 'waiting');
+    this.scheduled = new Set(batch.map((item) => item.key));
     try {
-      for (const item of this.queue) {
+      for (const item of batch) {
         if (generation !== this.generation) return;
-        if (item.state !== 'waiting') continue;
+        if (item.state !== 'waiting' || !this.queue.some((queued) => queued.key === item.key))
+          continue;
         item.state = 'uploading';
         item.controller = new AbortController();
         try {
@@ -129,7 +143,10 @@ export class UploadsState {
     } catch (error) {
       if (generation === this.generation) this.notify(errorMessage(error));
     } finally {
-      if (generation === this.generation) this.busy = false;
+      if (generation === this.generation) {
+        this.busy = false;
+        this.scheduled.clear();
+      }
     }
   }
   async poll(): Promise<void> {

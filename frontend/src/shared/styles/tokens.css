@@ -51,7 +51,7 @@
 }
 @media (max-width: 760px) {
   :root {
-    --topbar-height: 120px;
+    --topbar-height: 132px;
     --panel-gap: 6px;
   }
 }

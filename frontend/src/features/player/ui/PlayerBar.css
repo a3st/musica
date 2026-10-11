@@ -25,6 +25,7 @@
   flex-shrink: 0;
 }
 .now-text {
+  flex: 0 1 auto;
   min-width: 0;
 }
 .now-text strong {
@@ -292,5 +293,38 @@
   }
   .transport {
     justify-content: flex-end;
+  }
+}
+
+#player-add-uploads {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+#player-add-uploads.added {
+  color: var(--accent);
+  opacity: 1;
+}
+@media (max-width: 760px) {
+  #player-add-uploads {
+    width: 22px;
+    height: 22px;
+  }
+}
+.player-right {
+  width: 256px;
+}
+@media (max-width: 1200px) and (min-width: 761px) {
+  .player {
+    grid-template-columns: minmax(150px, 1fr) minmax(220px, 450px) 256px;
+  }
+}
+@media (max-width: 760px) {
+  .player-right {
+    width: auto;
   }
 }

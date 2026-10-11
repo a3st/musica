@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Select from '../../../shared/ui/Select.svelte';
   import Dialog from '../../../shared/ui/Dialog.svelte';
   import Icon from '../../../shared/ui/Icon.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
@@ -133,16 +134,21 @@
         bind:value={controller.description}
         disabled={controller.busy}></textarea></label
     >
-    <label
-      >{language.t('playlists.visibility')}<select
+    <div class="visibility-field">
+      <span>{language.t('playlists.visibility')}</span>
+      <Select
+        id="playlist-visibility"
         name="visibility"
-        bind:value={controller.visibility}
+        label={language.t('playlists.visibility')}
+        value={controller.visibility}
         disabled={controller.busy}
-        ><option value="private">{language.t('playlists.private')}</option><option value="public"
-          >{language.t('playlists.public')}</option
-        ><option value="unlisted">{language.t('playlists.unlisted')}</option></select
-      ></label
-    >
+        options={(['private', 'public', 'unlisted'] as const).map((value) => ({
+          value,
+          label: language.t(`playlists.${value}`),
+        }))}
+        onchange={(value) => (controller.visibility = value as typeof controller.visibility)}
+      />
+    </div>
     <p class="form-error" role="alert">{controller.error}</p>
     <button id="playlist-save" class="button primary wide" disabled={controller.busy}
       >{language.t(controller.id ? 'common.save' : 'playlists.create')}<Icon
@@ -151,3 +157,12 @@
     >
   </form>
 </Dialog>
+
+<style>
+  .visibility-field {
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+    font-size: 13px;
+  }
+</style>

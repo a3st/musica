@@ -15,6 +15,7 @@
   import SpotifyDialog from '../features/spotify-import/ui/SpotifyDialog.svelte';
   const app = new Application();
   setApplication(app);
+  $effect(() => app.player.engine.setAudioSettings(app.settings.audio));
   let confirmOpen = $state(false);
   let updateSW: (reload?: boolean) => Promise<void> = async () => {};
   $effect(() => {
@@ -105,8 +106,8 @@
     select={(id) => app.run(app.selectPlaylist(id))}
     menu={(playlist, origin, point) => app.showPlaylistMenu(playlist, origin, point)}
   />
-  <button class="button secondary" data-action="upload" onclick={() => app.upload()}
-    >{app.language.t('uploads.title')}</button
+  <button class="button upload-button" data-action="upload" onclick={() => app.upload()}
+    ><Icon name="cloud" />{app.language.t('uploads.title')}</button
   >
 </Dialog>
 <AuthDialog

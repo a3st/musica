@@ -18,6 +18,7 @@
     document.body.classList.remove('resizing-sidebar');
   });
   function apply(value: number): void {
+    app.search.close();
     width = Math.max(104, Math.min(340, value));
   }
   function finish(): void {
@@ -37,6 +38,7 @@
     finish();
   }
   function scroll(): void {
+    app.search.close();
     clearTimeout(scrollTimer);
     scrolling = true;
     scrollTimer = setTimeout(() => {
@@ -70,6 +72,7 @@
     onpointerdown={(event) => {
       if (event.button !== 0) return;
       event.preventDefault();
+      app.search.close();
       dragging = true;
       event.currentTarget.setPointerCapture(event.pointerId);
     }}

@@ -1,3 +1,4 @@
+import { SettingsState } from '../features/settings/state.svelte';
 import { AuthState } from '../features/auth/state.svelte';
 import { authApi } from '../features/auth/api';
 import { capabilitiesApi } from '../features/capabilities/api';
@@ -19,6 +20,7 @@ import type { Track } from '../features/tracks/model';
 import type { SearchTrack } from '../features/web-search/model';
 import { searchTrackKey } from '../features/web-search/model';
 import { waitForDownloadedTrack } from '../features/web-search/playback';
+import { tracksApi } from '../features/tracks/api';
 import { playlistsApi } from '../features/playlists/api';
 
 export interface Confirmation {
@@ -39,6 +41,79 @@ export class Application {
   readonly library = new PlaylistsState();
   readonly language = new LanguageState();
   readonly theme = new ThemeState();
+  readonly settings = new SettingsState();
+  uploadsTrackIds = $state.raw<Set<string> | null>(null);
+  currentTrackAdding = $state<string | null>(null);
+  private uploadsMembershipController?: AbortController;
+
+  async syncUploadsMembership(): Promise<void> {
+    const user = this.auth.user;
+    if (!user) return;
+    const version = this.sessionVersion;
+    this.uploadsMembershipController?.abort();
+    const controller = (this.uploadsMembershipController = new AbortController());
+    try {
+      const playlist =
+        this.library.selected?.id === user.default_playlist_id
+          ? this.library.selected
+          : await playlistsApi.playlist(user.default_playlist_id, controller.signal);
+      if (controller.signal.aborted || version !== this.sessionVersion) return;
+      this.uploadsTrackIds = new Set(playlist.tracks.map((track) => track.id));
+    } catch (error) {
+      if (!controller.signal.aborted && version === this.sessionVersion)
+        this.notify(errorMessage(error));
+    }
+  }
+
+  async toggleCurrentUploads(): Promise<void> {
+    const track = this.player.value.current;
+    const user = this.auth.user;
+    if (!track || !user || !this.uploadsTrackIds || this.currentTrackAdding) return;
+    const version = this.sessionVersion;
+    const remove = async (): Promise<void> => {
+      this.currentTrackAdding = track.id;
+      try {
+        await tracksApi.removeTrack(track.id);
+        if (version !== this.sessionVersion) return;
+        const ids = new Set(this.uploadsTrackIds ?? []);
+        ids.delete(track.id);
+        this.uploadsTrackIds = ids;
+        delete this.search.serviceAdditions[track.id];
+        if (this.search.web.playingTrackId === track.id && this.search.web.playingTrackKey)
+          delete this.search.web.additions[this.search.web.playingTrackKey];
+        if (track.owner_id === user.id) this.player.engine.remove(track.id);
+        await this.refresh();
+      } finally {
+        if (version === this.sessionVersion) this.currentTrackAdding = null;
+      }
+    };
+    if (this.uploadsTrackIds.has(track.id)) {
+      if (track.owner_id === user.id) {
+        this.confirmation = {
+          title: this.language.t('tracks.deleteTitle'),
+          description: this.language.t('tracks.deleteDescription', { title: track.title }),
+          remove,
+        };
+      } else await remove();
+      return;
+    }
+    this.currentTrackAdding = track.id;
+    try {
+      await this.addServiceTrack(track);
+    } finally {
+      if (version === this.sessionVersion) this.currentTrackAdding = null;
+    }
+  }
+
+  settingsOpen = $state(false);
+
+  openSettings(): void {
+    this.settingsOpen = true;
+    this.player.lyricsOpen = false;
+    this.libraryOpen = false;
+    this.search.close();
+    this.menu.close();
+  }
   readonly menu = new MenuState();
   readonly player = new PlayerState(
     (message) => this.notify(message),
@@ -97,6 +172,7 @@ export class Application {
     this.authOpen = true;
     await authApi.signIn(username, password, register);
     await this.openSession();
+    await this.syncUploadsMembership();
   }
   async openSession(): Promise<void> {
     const version = ++this.sessionVersion;
@@ -154,17 +230,23 @@ export class Application {
   }
   async start(): Promise<void> {
     await this.openSession();
+    await this.syncUploadsMembership();
   }
   async selectPlaylist(
     id: string,
     token: string | null = null,
     showPlaylist = true,
   ): Promise<void> {
-    if (showPlaylist) this.search.close();
+    if (showPlaylist) {
+      this.settingsOpen = false;
+      this.search.close();
+    }
     this.menu.close(false);
     this.libraryOpen = false;
     if (await this.library.select(id, token)) {
       const selected = this.library.selected!;
+      if (selected.id === this.auth.user?.default_playlist_id)
+        this.uploadsTrackIds = new Set(selected.tracks.map((track) => track.id));
       this.player.engine.updateMetadata(selected.tracks);
       selectNavigation(selected.id, token);
       if (this.player.cover?.id === selected.id) this.player.cover = selected;
@@ -186,11 +268,13 @@ export class Application {
         null,
         false,
       );
+    await this.syncUploadsMembership();
   }
 
-  async playSearchResult(result: LocalResult): Promise<void> {
+  async playSearchResult(result: LocalResult, keepOpen = false): Promise<void> {
     this.search.remember({ kind: 'local', result });
-    await this.selectPlaylist(result.playlistId);
+    await this.selectPlaylist(result.playlistId, null, !keepOpen);
+    this.settingsOpen = false;
     if (this.library.selected?.id !== result.playlistId) return;
     const track = this.library.selected?.tracks.find((item) => item.id === result.track.id);
     if (track) this.play(track);
@@ -226,10 +310,21 @@ export class Application {
     const user = this.auth.user;
     if (!this.requireLogin() || !user) return;
     this.search.remember({ kind: 'web', track });
-    this.search.web.playingTrackKey = searchTrackKey(track);
+    const key = searchTrackKey(track);
+    if (
+      this.search.web.playingTrackKey === key &&
+      this.search.web.playingTrackId === this.player.value.current?.id &&
+      this.player.engine.audio.src
+    ) {
+      this.player.engine.toggle();
+      return;
+    }
+    this.search.web.playingTrackKey = key;
+    this.search.web.playingTrackId = null;
     await this.player.engine.loadDeferred(async (signal) => {
       const id = await this.search.web.prepare(track, signal);
       signal.throwIfAborted();
+      this.search.web.playingTrackId = id;
       return waitForDownloadedTrack(id, signal);
     });
   }
@@ -237,6 +332,10 @@ export class Application {
   async playServiceTrack(track: Track): Promise<void> {
     if (!this.requireLogin()) return;
     this.search.remember({ kind: 'service', track });
+    if (this.player.value.current?.id === track.id && this.player.engine.audio.src) {
+      this.player.engine.toggle();
+      return;
+    }
     this.player.cover = null;
     await this.player.engine.load(track, [track], true);
   }
@@ -246,7 +345,11 @@ export class Application {
     if (!this.requireLogin() || !user) return;
     const target = playlistId ?? user.default_playlist_id;
     const addingToUploads = target === user.default_playlist_id;
-    if (addingToUploads && this.search.serviceAdditions[track.id]) return;
+    if (
+      addingToUploads &&
+      (this.uploadsTrackIds?.has(track.id) || this.search.serviceAdditions[track.id] === 'adding')
+    )
+      return;
     const version = this.sessionVersion;
     if (addingToUploads) this.search.serviceAdditions[track.id] = 'adding';
     try {
@@ -368,6 +471,10 @@ export class Application {
     }
   }
   reset(): void {
+    this.uploadsMembershipController?.abort();
+    this.uploadsTrackIds = null;
+    this.currentTrackAdding = null;
+    this.settingsOpen = false;
     this.sessionVersion++;
     clearTimeout(this.toastTimer);
     this.toast = '';
@@ -384,6 +491,7 @@ export class Application {
     this.menu.close(false);
   }
   dispose(): void {
+    this.uploadsMembershipController?.abort();
     this.disposed = true;
     this.sessionVersion++;
     clearTimeout(this.toastTimer);

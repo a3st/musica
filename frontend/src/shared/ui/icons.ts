@@ -1,4 +1,17 @@
 export const paths: Record<string, string> = {
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+  external: '<path d="M14 3h7v7m0-7L10 14M10 3H3v18h18v-7"/>',
+  devices:
+    '<rect x="3" y="3" width="14" height="11" rx="2"/><path d="M7 18h6m-3-4v4"/><rect x="16" y="10" width="5" height="11" rx="1"/>',
+  'library-add': '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+  'library-added':
+    '<circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><path d="M12 8v8M8 12h8" stroke="#fff" stroke-width="2"/>',
+
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  hamburger: '<path d="M4 7h16M4 17h10"/>',
+  settings:
+    '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
+  minus: '<path d="M5 12h14"/>',
   'chevron-right': '<path d="m9 5 7 7-7 7"/>',
   edit: '<path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15l-1 6Z"/>',
   link: '<path d="m10 14 4-4m-5 6-2 2a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 0 2-2a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/>',

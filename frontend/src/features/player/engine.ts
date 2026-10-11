@@ -1,3 +1,5 @@
+import { AudioEffects } from './audio-effects';
+import type { AudioSettings } from '../settings/model';
 import { t } from '../../shared/i18n';
 import { errorMessage } from '../../shared/api/errors';
 import { readPreference, writePreference } from '../../shared/utils/storage';
@@ -6,6 +8,12 @@ import { tracksApi as api } from '../tracks/api';
 import type { Track } from '../tracks/model';
 export class PlayerEngine {
   readonly audio = new Audio();
+  private readonly effects = new AudioEffects(this.audio);
+
+  setAudioSettings(settings: AudioSettings): void {
+    this.effects.update(settings);
+  }
+
   current: Track | null = null;
   loading = false;
   shuffle = false;
@@ -124,6 +132,7 @@ export class PlayerEngine {
 
   /** Сохраняет громкость отдельно от mute, чтобы выключение звука не теряло уровень. */
   private saveVolume(): void {
+    this.effects.volumeChanged();
     writePreference('musica:volume', String(Math.round(this.audio.volume * 100)));
     writePreference('musica:muted', String(this.audio.muted));
   }
@@ -144,6 +153,7 @@ export class PlayerEngine {
     this.advance(1);
   }
   dispose(): void {
+    this.effects.dispose();
     this.listeners.abort();
     this.stop();
     if ('mediaSession' in navigator) {
@@ -157,6 +167,7 @@ export class PlayerEngine {
   }
   /** Ожидает загрузку каталожного трека, отменяя ожидание при выборе другого. */
   async loadDeferred(resolveTrack: (signal: AbortSignal) => Promise<Track>): Promise<void> {
+    this.effects.activate();
     this.stop();
     const generation = this.generation;
     const controller = new AbortController();
@@ -177,9 +188,11 @@ export class PlayerEngine {
   }
 
   async load(track: Track, queue: Track[], waitForAutomaticPreparation = false): Promise<void> {
+    this.effects.activate();
     this.stop();
     const generation = this.generation;
     const token = this.shareToken(track.id);
+    this.effects.resetTrack();
     this.current = track;
     this.queue = queue.filter((item) => item.status !== 'pending');
     this.loading = true;
@@ -264,6 +277,7 @@ export class PlayerEngine {
     }
   }
   toggle(): void {
+    this.effects.activate();
     if (!this.current || this.loading) return;
     if (this.audio.paused) this.resume();
     else this.pause();
@@ -305,6 +319,7 @@ export class PlayerEngine {
     this.audio.pause();
   }
   private startPlayback(): void {
+    this.effects.activate();
     if (!this.current || !this.playbackRequested || this.playAttempt) return;
     const generation = this.generation;
     const attempt = this.audio.play();

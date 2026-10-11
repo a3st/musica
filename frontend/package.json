@@ -17,6 +17,7 @@
     "format": "prettier --write src vite.config.ts svelte.config.js",
     "format:check": "prettier --check src vite.config.ts svelte.config.js",
     "test:player": "node tests/unit/player.mjs",
+    "test:audio": "node tests/unit/audio-settings.mjs",
     "test:i18n": "node tests/unit/i18n.mjs"
   },
   "devDependencies": {

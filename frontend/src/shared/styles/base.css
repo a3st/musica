@@ -517,6 +517,10 @@ progress::-moz-progress-bar {
     margin-top: 16px;
     flex-shrink: 0;
   }
+  .library-sheet > .upload-button {
+    padding: 9px 18px;
+    font-size: 14px;
+  }
 }
 @media (max-width: 760px) {
   .library-sheet {

@@ -27,14 +27,20 @@
     id="open-library"
     aria-label={app.language.t('navigation.openPlaylists')}
     onclick={() => {
+      app.search.close();
       app.libraryOpen = true;
-    }}><Icon name="library" /></button
+    }}><Icon name="hamburger" /></button
   >
   <SearchBox
     state={app.search}
+    currentId={app.player.value.current?.id ?? null}
+    paused={app.player.value.paused}
+    activeWebKey={app.search.web.playingTrackId === app.player.value.current?.id
+      ? app.search.web.playingTrackKey
+      : null}
     language={app.language}
     importsEnabled={app.importsEnabled}
-    play={(result) => app.run(app.playSearchResult(result))}
+    play={(result, keepOpen) => app.run(app.playSearchResult(result, keepOpen))}
     playWeb={(track) => app.run(app.playWebTrack(track))}
     menu={(track, origin) => app.showWebTrackMenu(track, origin)}
     playService={(track) => app.run(app.playServiceTrack(track))}
@@ -71,32 +77,33 @@
         }}><Avatar name={app.auth.user?.username ?? 'Musica'} /></button
       >
       <div id="profile-menu" class="profile-menu" hidden={!profileOpen}>
-        <button
-          id="theme-toggle"
+        <a
           class="profile-menu-item"
-          title={app.language.t(
-            app.theme.value === 'dark' ? 'profile.lightTheme' : 'profile.darkTheme',
-          )}
-          onclick={() => app.theme.toggle()}
-          ><Icon name={app.theme.value === 'dark' ? 'sun' : 'moon'} />{app.language.t(
-            app.theme.value === 'dark' ? 'profile.lightTheme' : 'profile.darkTheme',
-          )}</button
+          href="#account"
+          onclick={(event) => {
+            event.preventDefault();
+            profileOpen = false;
+            app.notify(app.language.t('profile.accountUnavailable'));
+          }}><Icon name="account" />{app.language.t('profile.account')}<Icon name="external" /></a
         >
-        <label class="profile-menu-item"
-          >{app.language.t('profile.language')}<select
-            id="language"
-            aria-label={app.language.t('profile.language')}
-            value={app.language.locale}
-            onchange={(event) => app.language.set(event.currentTarget.value)}
-            ><option value="ru-RU">Русский</option><option value="en-US">English (US)</option
-            ></select
-          ></label
+        <button
+          id="open-settings"
+          class="profile-menu-item"
+          onclick={() => {
+            profileOpen = false;
+            app.openSettings();
+          }}
         >
+          <Icon name="settings" />{app.language.t('settings.title')}
+        </button>
         <button
           class="profile-menu-item"
           data-action="logout"
           hidden={!app.auth.user}
-          onclick={() => app.run(app.logout())}>{app.language.t('profile.signOut')}</button
+          onclick={() => {
+            profileOpen = false;
+            app.run(app.logout());
+          }}><Icon name="logout" />{app.language.t('profile.signOut')}</button
         >
       </div>
     </div>

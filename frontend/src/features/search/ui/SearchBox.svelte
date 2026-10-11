@@ -21,13 +21,16 @@
     addService,
     serviceMenu,
     ownsContextMenu = false,
+    currentId = null,
+    paused = true,
+    activeWebKey = null,
     waitingTrackKey = null,
     waitingServiceId = null,
   }: {
     state: SearchState;
     language: LanguageState;
     importsEnabled: boolean;
-    play: (result: LocalResult) => void;
+    play: (result: LocalResult, keepOpen: boolean) => void;
     add: (track: SearchTrack) => void;
     playWeb: (track: SearchTrack) => void;
     menu: (track: SearchTrack, origin: HTMLElement) => void;
@@ -35,6 +38,9 @@
     addService: (track: Track) => void;
     serviceMenu: (track: Track, origin: HTMLElement) => void;
     ownsContextMenu?: boolean;
+    currentId?: string | null;
+    paused?: boolean;
+    activeWebKey?: string | null;
     waitingTrackKey?: string | null;
     waitingServiceId?: string | null;
   } = $props();
@@ -93,8 +99,8 @@
     else buttons[next].focus();
   }
 
-  function activate(result: RecentResult): void {
-    if (result.kind === 'local') play(result.result);
+  function activate(result: RecentResult, keepOpen = false): void {
+    if (result.kind === 'local') play(result.result, keepOpen);
     else if (result.kind === 'service') playService(result.track);
     else {
       controller.remember(result);
@@ -199,15 +205,23 @@
               result.kind === 'web'
                 ? waitingTrackKey === searchTrackKey(result.track)
                 : result.kind === 'service' && waitingServiceId === result.track.id}
+            {@const playing =
+              !paused &&
+              (result.kind === 'web'
+                ? activeWebKey === searchTrackKey(result.track)
+                : currentId ===
+                  (result.kind === 'local' ? result.result.track.id : result.track.id))}
             <li class="search-result" data-source={result.kind}>
               <button
                 class="search-result-art"
                 disabled={waiting ||
                   (result.kind === 'web' && !importsEnabled) ||
                   (result.kind === 'local' && result.result.track.status === 'pending')}
-                aria-label={language.t('tracks.play', { title: track.title })}
+                aria-label={language.t(playing ? 'tracks.pause' : 'tracks.play', {
+                  title: track.title,
+                })}
                 aria-busy={waiting}
-                onclick={() => activate(result)}
+                onclick={() => activate(result, true)}
               >
                 {#if result.kind === 'web' && result.track.artwork_url}
                   <img
@@ -224,7 +238,7 @@
                 <span class="search-art-play">
                   {#if waiting}
                     <span class="spinner"></span>
-                  {:else}<Icon name="play" />{/if}
+                  {:else}<Icon name={playing ? 'pause' : 'play'} />{/if}
                 </span>
               </button>
               <button
@@ -232,7 +246,7 @@
                 disabled={waiting ||
                   (result.kind === 'web' && !importsEnabled) ||
                   (result.kind === 'local' && result.result.track.status === 'pending')}
-                aria-label={language.t('tracks.play', {
+                aria-label={language.t(playing ? 'tracks.pause' : 'tracks.play', {
                   title: track.title,
                 })}
                 onclick={() => activate(result)}
@@ -251,9 +265,6 @@
                     )}</span
                   >
                 </span>
-                {#if result.kind !== 'web'}
-                  <Icon name="play" />
-                {/if}
               </button>
               {#if result.kind === 'web'}
                 <button

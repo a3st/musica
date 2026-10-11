@@ -110,6 +110,11 @@ await page.route('**/api/**', async route => {
     attachments.push({ playlist: id(4), track: id(6) });
     return route.fulfill({ status: 204 });
   }
+  if (url.pathname === `/api/tracks/${id(6)}` && request.method() === 'DELETE') {
+    const index = tracks.findIndex(track => track.id === id(6));
+    if (index >= 0) tracks.splice(index, 1);
+    return route.fulfill({status:204});
+  }
   if (url.pathname === '/api/web/tracks') {
     const selection = request.postDataJSON();
     assert.equal(selection.provider, song.provider);
@@ -165,6 +170,10 @@ try {
   assert.equal(await page.locator('#now-title').textContent(), 'Готовим к воспроизведению…');
   assert.equal(await page.locator('#player-play .spinner').count(), 1);
   await page.locator('#player-play[aria-label="Пауза"]').waitFor();
+  await page.locator('.search-result-art').click();
+  await page.waitForFunction(() => document.querySelector('.search-result-art svg path')?.getAttribute('d') === 'm9 5 11 7-11 7z');
+  await page.locator('.search-result-art').click();
+  await page.locator('#player-play[aria-label="\u041f\u0430\u0443\u0437\u0430"]').waitFor();
   console.log('PASS: playback starts without adding to Uploads.');
   assert.equal(tracks.length, 0, 'playing a catalog result does not add it to Uploads');
   assert.equal(additions, 0);
@@ -176,7 +185,7 @@ try {
   await page.locator('#search').focus();
   const add = page.locator('.search-result-add');
   await add.click();
-  await page.getByRole('button', { name: 'Добавлено', exact: true }).waitFor();
+  await page.locator('#search-results').getByRole('button', { name: 'Добавлено', exact: true }).waitFor();
   assert.equal(await add.isDisabled(), true);
   assert.equal(additions, 1);
   await page.locator('.search-result-more').click();
@@ -211,6 +220,11 @@ try {
   assert.equal(await page.locator('.search-result-action').isDisabled(), false, 'ready personal tracks can be played');
   assert.equal(await page.locator('.search-result').count(), 1, 'a track present in two playlists is deduplicated');
   assert.equal(searches.length, previousSearches);
+  await page.locator('#search').fill('local favorite');
+  await page.locator('#search').press('Enter');
+  await page.locator('.search-result[data-source=local]').waitFor();
+  await page.locator('.search-result-art').click();
+  await page.locator('#player-play[aria-label="\u041f\u0430\u0443\u0437\u0430"]').waitFor();
   await page.locator('#search').fill('play catalog');
   await page.locator('#search').press('Enter');
   await page.locator('.search-result[data-source=web]').waitFor();
@@ -247,9 +261,21 @@ try {
   await page.waitForFunction(() => document.querySelector('.toast')?.textContent?.includes('Трек добавлен'));
   assert.equal(attachments.at(-1).track, serviceSong.id);
   assert.equal(tracks.length, beforeServiceUploads, 'choosing another playlist does not add to Uploads');
-  await page.locator('.search-result[data-source=service] .search-result-add').click();
-  await page.getByRole('button', { name: 'Добавлено', exact: true }).waitFor();
+  assert.equal(await page.locator('#player-add-uploads').getAttribute('aria-pressed'), 'false');
+  await page.locator('#player-add-uploads').click();
+  await page.waitForFunction(() => document.querySelector('#player-add-uploads')?.getAttribute('aria-pressed') === 'true');
+  assert.equal(await page.locator('#player-add-uploads').isDisabled(), false);
+  await page.locator('#search').focus();
+  await page.locator('#search-results').getByRole('button', { name: 'Добавлено', exact: true }).waitFor();
   assert.equal(tracks.length, beforeServiceUploads + 1);
+  await page.locator('#player-add-uploads').click();
+  await page.waitForFunction(() => document.querySelector('#player-add-uploads')?.getAttribute('aria-pressed') === 'false');
+  assert.equal(tracks.length, beforeServiceUploads, 'removing a service track only removes the Uploads membership');
+  assert.equal(await page.locator('#now-title').textContent(), serviceSong.title, 'removing membership preserves the current track');
+  await page.locator('#player-add-uploads').click();
+  await page.waitForFunction(() => document.querySelector('#player-add-uploads')?.getAttribute('aria-pressed') === 'true');
+  assert.equal(tracks.length, beforeServiceUploads + 1, 'the track can be added again');
+
 
   await page.locator('#search').fill('shared error');
   await page.locator('#search').press('Enter');
@@ -296,10 +322,10 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.screenshot({ path: '../backend/.zig-cache/search-dropdown-mobile.png' });
   await page.locator('#profile-toggle').click();
-  await page.locator('#language').selectOption('en-US');
+  await page.locator('#open-settings').click(); await page.locator('#language').selectOption('en-US', { force: true }); await page.locator('#settings-close').click();
   await page.locator('#search').fill('');
   await page.getByRole('heading', { name: 'Recent finds' }).waitFor();
-  assert.equal(await page.locator('.search-result').count(), 2, 'catalog and service results are remembered for this session');
+  assert.equal(await page.locator('.search-result').count(), 3, 'catalog, local and service results are remembered for this session');
   await page.locator('#search').press('Escape');
   await page.locator('#search-results').waitFor({ state: 'detached' });
   await page.locator('#search').fill('local favorite');

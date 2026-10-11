@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { moduleUrl } from '../helpers/typescript.mjs';
-const { parseSpotifyExport: parse, combineSpotifyExports: combine } = await import(moduleUrl(new URL('../../src/features/spotify-import/parser.ts', import.meta.url)));
+const { parseSpotifyExport: parse, combineSpotifyExports: combine, selectSpotifyTracks } = await import(moduleUrl(new URL('../../src/features/spotify-import/parser.ts', import.meta.url)));
 const uri = 'spotify:track:0123456789012345678901';
 const playlists = parse({ playlists: [{ name: 'Плейлист', description: '<script>test</script>', items: [
   { track: { trackName: 'Get Lucky', artistName: 'Daft Punk', albumName: 'Random Access Memories', trackUri: uri } },
@@ -23,3 +23,9 @@ assert.throws(() => combine([parse({ tracks: Array(5001).fill({ artist: 'Artist'
 assert.throws(() => parse([{ endTime: 'Streaming history' }]));
 assert.equal(combine([parse({ tracks: [{ artist: 'Artist', track: 'Title' }, { artist: 'ARTIST', track: ' title ' }] })]).tracks, 1);
 console.log('PASS: Spotify exports, Unicode metadata, deduplication, skipped podcasts/local files, malformed data and import limits.');
+
+const filtered = selectSpotifyTracks(result.input, new Set(['playlist:0:0']));
+assert.equal(filtered.playlists[0].tracks.length, 0);
+assert.equal(filtered.library.length, 1, 'excluding a playlist membership does not exclude library membership');
+assert.equal(result.input.playlists[0].tracks.length, 1, 'selection preserves the parsed draft');
+assert.equal(selectSpotifyTracks(result.input, new Set(['library:0'])).library.length, 0);

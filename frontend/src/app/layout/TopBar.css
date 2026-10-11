@@ -190,7 +190,7 @@
   display: grid;
   grid-template-columns: 200px minmax(0, 580px) 1fr;
   gap: 24px;
-  z-index: 30;
+  z-index: 45;
 }
 .topbar > .brand {
   margin: 0;
@@ -282,5 +282,101 @@
   }
   .profile-menu {
     width: min(240px, calc(100vw - 24px));
+  }
+}
+
+.profile-toggle {
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  padding: 3px;
+  background: var(--header);
+}
+.profile-menu-item {
+  justify-content: flex-start;
+  font-size: 14px;
+  text-align: left;
+}
+.profile-menu-heading {
+  padding: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .topbar > .brand {
+    font-size: 16px;
+  }
+  .topbar-actions {
+    gap: 6px;
+  }
+  .topbar .upload-button {
+    display: flex;
+    width: auto;
+    height: 34px;
+    padding: 7px 9px;
+    border-radius: 18px;
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .topbar .upload-button > svg {
+    display: none;
+  }
+  .topbar .upload-button span {
+    display: inline;
+  }
+  .topbar .upload-button span[hidden] {
+    display: none;
+  }
+}
+
+.profile-toggle {
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s,
+    background 0.15s;
+}
+.profile-toggle:hover {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.profile-toggle:active {
+  transform: scale(0.92);
+}
+.profile-toggle[aria-expanded='true'] {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+@media (max-width: 760px) {
+  .topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .topbar #open-library {
+    justify-self: start;
+    margin-left: 2px;
+    width: 34px;
+    height: 34px;
+  }
+  .topbar .upload-button {
+    display: none;
+  }
+}
+
+:root[data-theme='dark'] .topbar {
+  background: #151b29;
+  border-color: #ffffff16;
+}
+.profile-menu a {
+  text-decoration: none;
+}
+.profile-menu a > svg:last-child {
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+}
+@media (max-width: 760px) {
+  .topbar {
+    row-gap: 18px;
   }
 }

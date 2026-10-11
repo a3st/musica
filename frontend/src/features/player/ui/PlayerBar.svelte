@@ -1,10 +1,26 @@
 <script lang="ts">
+  import Dialog from '../../../shared/ui/Dialog.svelte';
   import Icon from '../../../shared/ui/Icon.svelte';
   import TrackArtwork from '../../tracks/ui/TrackArtwork.svelte';
   import { time } from '../../../shared/utils/time';
   import type { PlayerState } from '../state.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
-  let { state: controller, language }: { state: PlayerState; language: LanguageState } = $props();
+  let {
+    state: controller,
+    language,
+    inUploads = false,
+    adding = false,
+    canAdd = false,
+    addToUploads,
+  }: {
+    state: PlayerState;
+    language: LanguageState;
+    inUploads?: boolean;
+    adding?: boolean;
+    canAdd?: boolean;
+    addToUploads: () => void;
+  } = $props();
+  let devicesOpen = $state(false);
   const value = $derived(controller.value);
   const progress = $derived(value.duration ? (value.elapsed / value.duration) * 100 : 0);
   const volume = $derived(value.muted ? 0 : value.volume);
@@ -30,11 +46,28 @@
         />{:else}<Icon name="music" />{/if}
     </div>
     <div class="now-text">
-      <strong id="now-title">{value.current?.title ?? language.t('player.preparing')}</strong><span
-        id="now-artist"
+      <strong id="now-title">{value.current?.title ?? language.t('player.preparing')}</strong>
+      <span id="now-artist"
         >{value.loading ? language.t('player.preparing') : (value.current?.artist ?? '')}</span
       >
     </div>
+    {#if value.current}
+      <button
+        id="player-add-uploads"
+        class="icon-button"
+        class:added={inUploads}
+        aria-pressed={inUploads}
+        aria-label={inUploads
+          ? language.t('player.removeUploads', { title: value.current.title })
+          : language.t('web.addTrack', { title: value.current.title })}
+        disabled={!canAdd || adding}
+        onclick={addToUploads}
+      >
+        {#if adding}<span class="spinner"></span>{:else}<Icon
+            name={inUploads ? 'library-added' : 'library-add'}
+          />{/if}
+      </button>
+    {/if}
   </div>
   <div class="player-center">
     <div class="transport">
@@ -119,7 +152,17 @@
       onclick={() => {
         controller.queueOpen = !controller.queueOpen;
       }}><Icon name="queue" /></button
-    ><button
+    >
+    <button
+      id="devices-toggle"
+      class="icon-button"
+      aria-label={language.t('player.devices')}
+      title={language.t('player.devices')}
+      aria-haspopup="dialog"
+      aria-controls="devices-dialog"
+      onclick={() => (devicesOpen = true)}><Icon name="devices" /></button
+    >
+    <button
       id="mute"
       class="icon-button"
       aria-label={muteLabel}
@@ -139,3 +182,15 @@
     />
   </div>
 </footer>
+
+<Dialog id="devices-dialog" bind:open={devicesOpen}>
+  <div class="dialog-heading">
+    <h2>{language.t('player.devices')}</h2>
+    <button
+      class="icon-button"
+      aria-label={language.t('common.close')}
+      onclick={() => (devicesOpen = false)}><Icon name="close" /></button
+    >
+  </div>
+  <p class="muted">{language.t('player.devicesUnavailable')}</p>
+</Dialog>

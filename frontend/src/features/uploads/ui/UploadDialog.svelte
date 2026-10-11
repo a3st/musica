@@ -18,7 +18,16 @@
   let dragging = $state(false);
 </script>
 
-<Dialog id="upload-dialog" class="upload-dialog" bind:open={controller.open}>
+<Dialog
+  id="upload-dialog"
+  class="upload-dialog"
+  bind:open={controller.open}
+  onclose={() => {
+    controller.dismiss();
+    dragging = false;
+    input.value = '';
+  }}
+>
   <div class="dialog-heading">
     <div>
       <span class="eyebrow">{language.t('uploads.eyebrow')}</span>

@@ -3,6 +3,7 @@ import { errorMessage } from '../../shared/api/errors';
 import { spotifyApi } from './api';
 import {
   combineSpotifyExports,
+  selectSpotifyTracks,
   maxExportBytes,
   parseSpotifyExport,
   type SpotifyImport,
@@ -16,6 +17,42 @@ export class SpotifyState {
   error = $state('');
   notice = $state('');
   open = $state(false);
+  excluded = $state.raw<Set<string>>(new Set());
+
+  get selection(): SpotifyImport | null {
+    return this.input ? selectSpotifyTracks(this.input, this.excluded) : null;
+  }
+
+  get selectedTracks(): number {
+    const input = this.selection;
+    return input
+      ? new Set(
+          [...input.library, ...input.playlists.flatMap((playlist) => playlist.tracks)].map(
+            (track) => `${track.artist.toLowerCase()}\0${track.title.toLowerCase()}`,
+          ),
+        ).size
+      : 0;
+  }
+
+  toggle(key: string): void {
+    if (this.busy) return;
+    const excluded = new Set(this.excluded);
+    if (excluded.has(key)) excluded.delete(key);
+    else excluded.add(key);
+    this.excluded = excluded;
+  }
+
+  dismiss(): void {
+    this.open = false;
+    this.reading++;
+    this.readingFiles = false;
+    this.input = null;
+    this.preview = null;
+    this.excluded = new Set();
+    this.error = '';
+    if (!this.busy) this.notice = '';
+  }
+
   private reading = 0;
   private generation = 0;
   constructor(private readonly changed: (id?: string) => Promise<void>) {}
@@ -24,6 +61,7 @@ export class SpotifyState {
     this.reading++;
     this.input = null;
     this.preview = null;
+    this.excluded = new Set();
     this.busy = false;
     this.readingFiles = false;
     this.error = '';
@@ -35,6 +73,7 @@ export class SpotifyState {
     const version = ++this.reading;
     this.input = null;
     this.preview = null;
+    this.excluded = new Set();
     this.error = '';
     this.notice = '';
     this.readingFiles = true;
@@ -66,13 +105,14 @@ export class SpotifyState {
     }
   }
   async start(): Promise<void> {
-    if (!this.input || this.busy) return;
+    const selection = this.selection;
+    if (!selection || !this.selectedTracks || this.busy) return;
     const generation = this.generation;
     this.busy = true;
     this.error = '';
     this.notice = '';
     try {
-      const result = await spotifyApi.importSpotify(this.input);
+      const result = await spotifyApi.importSpotify(selection);
       if (generation !== this.generation) return;
       this.input = null;
       this.notice = t('spotify.imported', {

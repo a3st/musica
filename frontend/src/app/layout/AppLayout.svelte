@@ -5,6 +5,7 @@
   import CollectionScrollbar from '../../shared/ui/CollectionScrollbar.svelte';
   import AuthPlaceholder from './AuthPlaceholder.svelte';
   import Icon from '../../shared/ui/Icon.svelte';
+  import SettingsPage from '../../pages/SettingsPage.svelte';
   import PlaylistPage from '../../pages/PlaylistPage.svelte';
   import PlayerBar from '../../features/player/ui/PlayerBar.svelte';
   import QueuePanel from '../../features/player/ui/QueuePanel.svelte';
@@ -30,10 +31,13 @@
       <main
         bind:this={main}
         id="collection"
+        class:playlist-view={!app.settingsOpen && !!app.library.selected}
         aria-live="polite"
         aria-busy={app.sessionLoading && !app.library.selected}
       >
-        {#if app.library.selected}
+        {#if app.settingsOpen}
+          <SettingsPage />
+        {:else if app.library.selected}
           <PlaylistPage />
         {:else if app.sessionError}
           <div class="collection-state" role="alert">
@@ -56,10 +60,21 @@
   </div>
   <QueuePanel state={app.player} language={app.language} />
   <LyricsPanel state={app.player} language={app.language} />
-  <PlayerBar state={app.player} language={app.language} />
+  <PlayerBar
+    state={app.player}
+    language={app.language}
+    inUploads={!!app.player.value.current &&
+      !!app.uploadsTrackIds?.has(app.player.value.current.id)}
+    adding={app.currentTrackAdding === app.player.value.current?.id}
+    canAdd={!!app.auth.user && app.uploadsTrackIds !== null}
+    addToUploads={() => app.run(app.toggleCurrentUploads())}
+  />
 {/if}
 
 <style>
+  main.playlist-view {
+    padding: 0;
+  }
   .library-panels {
     display: contents;
   }

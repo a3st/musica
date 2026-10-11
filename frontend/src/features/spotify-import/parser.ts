@@ -21,6 +21,20 @@ export interface SpotifyExport {
 }
 export const maxExportBytes = 16 * 1024 * 1024;
 
+/** Filters individual playlist memberships without mutating the parsed export. */
+export function selectSpotifyTracks(
+  input: SpotifyImport,
+  excluded: ReadonlySet<string>,
+): SpotifyImport {
+  return {
+    playlists: input.playlists.map((playlist, group) => ({
+      ...playlist,
+      tracks: playlist.tracks.filter((_, index) => !excluded.has(`playlist:${group}:${index}`)),
+    })),
+    library: input.library.filter((_, index) => !excluded.has(`library:${index}`)),
+  };
+}
+
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     throw new Error(t('spotify.invalidStructure'));

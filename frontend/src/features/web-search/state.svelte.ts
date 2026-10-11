@@ -13,6 +13,7 @@ export class WebSearchState {
   error = $state('');
   additions = $state<Record<string, 'adding' | 'added'>>({});
   playingTrackKey = $state<string | null>(null);
+  playingTrackId = $state<string | null>(null);
   private trackIds = new Map<string, string>();
   private pendingAdditions = new Map<string, Promise<string>>();
   private searchController?: AbortController;
@@ -120,5 +121,6 @@ export class WebSearchState {
     this.trackIds.clear();
     this.pendingAdditions.clear();
     this.playingTrackKey = null;
+    this.playingTrackId = null;
   }
 }

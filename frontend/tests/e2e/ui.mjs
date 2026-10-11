@@ -159,7 +159,8 @@ await page.route('**/api/**', async (route) => {
   }
   return json({ error: 'not_found' }, 404);
 });
-const toggleTheme = async () => { await page.locator('#profile-toggle').click(); await page.locator('#theme-toggle').click(); await page.keyboard.press('Escape'); };
+const openSettings = async () => { await page.locator('#profile-toggle').click(); await page.locator('#open-settings').click(); };
+const toggleTheme = async () => { await openSettings(); const theme = await page.locator('html').getAttribute('data-theme'); await page.locator('#theme-toggle').selectOption(theme === 'dark' ? 'light' : 'dark', { force: true }); await page.locator('#settings-close').click(); };
 const openSpotify = async () => { if (await page.locator('.sidebar').isVisible()) await page.locator('.topbar [data-action=upload]').click(); else { await page.locator('#open-library').click(); await page.locator('#library-dialog [data-action=upload]').click(); } await page.locator('#upload-dialog [data-action=spotify-import]').click(); };
 const overflow = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'horizontal overflow');
 const checkPanelScrollbar = async (panelId, contentId) => {
@@ -198,6 +199,14 @@ try {
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
   assert.equal(await page.locator('.now-playing').isVisible(), false, 'no placeholder track when nothing is selected');
   assert.equal(await page.locator('#refresh').count(), 0);
+  await page.locator('#profile-toggle').click();
+  assert.equal(await page.locator('.profile-menu-heading').count(), 0);
+  await page.locator('#profile-menu a').click();
+  assert.equal(await page.locator('#profile-menu').isVisible(), false);
+  await page.locator('#devices-toggle').click();
+  await page.locator('#devices-dialog[open]').waitFor();
+  await page.locator('#devices-dialog .icon-button').click();
+
   assert.equal(await page.locator('#playlist-menu-toggle').count(), 0);
   assert.equal(await page.locator('.collection-toolbar button').count(), 2);
   assert.equal(await page.locator('.track-favorite').count(), 0);
@@ -274,6 +283,39 @@ try {
   assert.equal(await page.locator('.track-row').count(), 1, 'a stale auth failure cannot clear the playlist');
   await page.goto(base); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
 
+  await openSettings();
+  await page.locator('#equalizer-profile-toggle').click();
+  await page.locator('#equalizer-profile-toggle').press('Home');
+  await page.locator('#equalizer-profile-toggle').press('ArrowDown');
+  await page.locator('#equalizer-profile-toggle').press('Enter');
+  assert.equal(await page.locator('.equalizer input').first().inputValue(), '6');
+  await page.locator('.equalizer input').first().fill('8');
+  assert.equal(await page.locator('#equalizer-profile').inputValue(), 'custom');
+  for (const gain of ['12', '-12', '8']) {
+    await page.locator('.equalizer input').first().fill(gain);
+    await page.waitForFunction(() => {
+      const line = document.querySelector('.equalizer polyline');
+      const matrix = line.getScreenCTM();
+      return [...document.querySelectorAll('.equalizer-points i')].every((dot, index) => {
+        const point = line.points.getItem(index).matrixTransform(matrix);
+        const rect = dot.getBoundingClientRect();
+        return Math.abs(rect.x + rect.width / 2 - point.x) < 1 && Math.abs(rect.y + rect.height / 2 - point.y) < 1;
+      });
+    });
+  }
+
+  await page.locator('#normalization').check();
+  await page.locator('#collection').evaluate(element => element.scrollTop = 0);
+  await page.screenshot({path:'../backend/.zig-cache/ui-settings-new.png'});
+  await page.reload();
+  await page.locator('.playlist-hero').waitFor();
+  await openSettings();
+  assert.equal(await page.locator('.equalizer input').first().inputValue(), '8');
+  assert.equal(await page.locator('#normalization').isChecked(), true);
+  await page.locator('#equalizer-profile').selectOption('flat', { force: true });
+  await page.locator('#normalization').uncheck();
+  await page.locator('#settings-close').click();
+
   await page.locator('#volume').fill('35');
   assert.equal(await page.locator('#volume').evaluate(el => el.style.getPropertyValue('--progress')), '35%');
   assert.match(await page.locator('#volume').evaluate(el => getComputedStyle(el).backgroundImage), /35%/);
@@ -291,8 +333,11 @@ try {
   const handle = page.locator('#sidebar-resize');
   const box = await handle.boundingBox(); await page.mouse.move(box.x + box.width / 2, 200); await page.mouse.down(); await page.mouse.move(340, 200); await page.mouse.up();
   assert.equal(await handle.getAttribute('aria-valuenow'), '340'); await overflow();
+  await page.locator('#search').fill('m83');
+  await page.locator('#search-results').waitFor();
   await handle.focus(); await page.keyboard.press('Home');
   assert.equal(await handle.getAttribute('aria-valuenow'), '104');
+  assert.equal(await page.locator('#search-results').count(), 0, 'resizing the sidebar closes search');
   assert.ok((await page.locator('.sidebar').boundingBox()).width >= 88, 'collapsed sidebar leaves space around covers');
   assert.equal(await page.locator('.sidebar .nav-cover').first().isVisible(), true);
   assert.equal(await page.locator('.sidebar .playlist-link strong').first().isVisible(), false);
@@ -326,7 +371,7 @@ try {
   assert.equal(await page.locator('.sidebar .playlist-nav').evaluate(el => getComputedStyle(el).scrollbarColor), 'rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)', 'scrollbar disappears when scrolling stops');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('#profile-toggle').click(); assert.equal(await page.locator('#profile-menu').isVisible(), true);
-  await page.locator('#language').selectOption('en-US');
+  await page.locator('#open-settings').click(); await page.locator('#language').selectOption('en-US', { force: true }); await page.locator('#settings-close').click();
   assert.equal(await page.locator('html').getAttribute('lang'), 'en-US');
   assert.equal(await page.locator('#search').getAttribute('placeholder'), 'Search for songs or artists…');
   assert.equal(await page.locator('.sidebar .library-heading>span').textContent(), 'PLAYLISTS');
@@ -337,7 +382,7 @@ try {
   await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
   assert.equal(await page.locator('html').getAttribute('lang'), 'en-US', 'language survives reload');
   assert.equal(await page.locator('#sidebar-resize').getAttribute('aria-valuenow'), '244', 'sidebar width survives reload');
-  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('ru-RU'); await page.keyboard.press('Escape');
+  await page.locator('#profile-toggle').click(); await page.locator('#open-settings').click(); await page.locator('#language').selectOption('ru-RU', { force: true }); await page.locator('#settings-close').click(); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.sidebar .library-heading>span').textContent(), 'ПЛЕЙЛИСТЫ');
 
   await page.locator('.sidebar .playlist-search-input').fill('тихие');
@@ -365,6 +410,13 @@ try {
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.track-more')).opacity === '1');
   await page.locator('#search').fill('m83'); await page.locator('.search-result[data-source=local]').waitFor();
   await page.locator('.topbar').hover();
+
+  await page.locator('#lyrics-toggle').click();
+  await page.locator('#lyrics-panel.open').waitFor();
+  await page.locator('#search').focus();
+  const searchArt = await page.locator('.search-result-art').boundingBox();
+  assert.equal(await page.evaluate(({x, y, width, height}) => !!document.elementFromPoint(x + width / 2, y + height / 2)?.closest('.search-result-art'), searchArt), true, 'search results stay above Lyrics');
+  await page.locator('#lyrics-close').click();
   const clearColor = await page.locator('.search-clear').evaluate(element => getComputedStyle(element).color);
   await page.locator('.search-clear').hover();
   await page.waitForFunction(color => getComputedStyle(document.querySelector('.search-clear')).color !== color, clearColor);
@@ -377,6 +429,7 @@ try {
   assert.equal(await page.locator('.track-row').count(), rowsBeforeSearch, 'dropdown search leaves the playlist unchanged');
   await page.locator('#search').press('ArrowDown');
   assert.equal(await page.locator('.search-result-action').evaluate(element => element === document.activeElement), true);
+  assert.equal(await page.locator('.search-result-action svg').count(), 0, 'the cover contains the only play icon');
   await page.keyboard.press('Enter');
   await page.locator('#search-results').waitFor({ state: 'detached' });
   await page.locator('#player-play[aria-label="Пауза"]').waitFor();
@@ -403,10 +456,10 @@ try {
   await rowPlay.click();
   await page.locator('#player-play[aria-label="Пауза"]').waitFor();
   assert.equal(manifestRequests, requestsBeforeToggle, 'row and playlist toggles must not reload the current track');
-  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('en-US'); await page.keyboard.press('Escape');
+  await page.locator('#profile-toggle').click(); await page.locator('#open-settings').click(); await page.locator('#language').selectOption('en-US', { force: true }); await page.locator('#settings-close').click(); await page.keyboard.press('Escape');
   await page.locator('#player-play[aria-label="Pause"]').waitFor();
   assert.equal(await page.locator('#now-title').textContent(), 'Midnight City', 'language switch keeps the current track');
-  await page.locator('#profile-toggle').click(); await page.locator('#language').selectOption('ru-RU'); await page.keyboard.press('Escape');
+  await page.locator('#profile-toggle').click(); await page.locator('#open-settings').click(); await page.locator('#language').selectOption('ru-RU', { force: true }); await page.locator('#settings-close').click(); await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.querySelector('#elapsed').textContent !== '0:00');
   await page.locator('#player-play').click(); await page.locator('#player-play[aria-label="Воспроизвести"]').waitFor();
   const seek = page.locator('#player-seek');
@@ -509,6 +562,11 @@ try {
   await page.getByRole('heading', { name: 'В дороге', exact: true }).waitFor();
   await page.locator('.topbar [data-action="upload"]').click();
   assert.equal(await page.locator('#upload-target').count(), 0);
+  await page.locator('#file-input').setInputFiles([{ name: 'Draft.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('draft') }]);
+  await page.locator('#upload-dialog [data-close]').click();
+  await page.locator('.topbar [data-action="upload"]').click();
+  assert.equal(await page.locator('[data-upload-title]').count(), 0, 'closing the dialog discards unsubmitted files');
+
   await page.locator('#file-input').setInputFiles([{ name: 'Artist - New song.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('mock audio') }, { name: 'Other.flac', mimeType: 'audio/flac', buffer: Buffer.from('mock flac') }]);
   assert.equal(await page.locator('[data-upload-title]').first().inputValue(), 'New song');
   await page.locator('[data-upload-artist]').first().fill('Edited artist');
@@ -538,7 +596,7 @@ try {
   await page.locator('#edit-playlist').click(); await page.locator('#playlist-dialog[open]').waitFor();
   await page.locator('#playlist-form [name=title]').fill('Updated mix');
   await page.locator('#playlist-form [name=description]').fill('New description');
-  await page.locator('#playlist-form [name=visibility]').selectOption('public');
+  await page.locator('#playlist-form [name=visibility]').selectOption('public', { force: true });
   await page.locator('#playlist-image-input').setInputFiles({ name: 'updated.png', mimeType: 'image/png', buffer: updatedImageBytes });
   await page.locator('#playlist-save').click(); await page.getByRole('heading', { name: 'Updated mix', exact: true }).waitFor();
   assert.notEqual(created.image_key, originalImageKey);
@@ -576,6 +634,10 @@ try {
   await page.locator('#spotify-files').setInputFiles([{ name: 'Broken.json', mimeType: 'application/json', buffer: Buffer.from('{broken') }]);
   await page.getByText('Broken.json: некорректный JSON', { exact: true }).waitFor();
   assert.equal(await page.locator('#spotify-start').isDisabled(), true);
+  await page.locator('#spotify-dialog [data-close]').click();
+  await openSpotify();
+  assert.equal(await page.locator('#spotify-error').textContent(), '', 'closing the dialog clears import errors');
+
   const uri = 'spotify:track:0123456789012345678901';
   await page.locator('#spotify-files').setInputFiles([
     { name: 'Playlists.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ playlists: [{ name: 'Spotify mix', items: [{ track: { trackName: 'Get Lucky', artistName: 'Daft Punk', trackUri: uri } }] }] })) },
@@ -584,8 +646,10 @@ try {
   await page.getByText('1 уникальных треков · 1 плейлистов', { exact: true }).waitFor();
   assert.equal(await page.locator('.spotify-preview img').count(), 0, 'Spotify preview shows text only');
   await page.getByRole('button', { name: /Liked Songs → Uploads/ }).click();
-  assert.equal(await page.locator('.spotify-tracks h3').textContent(), 'Liked Songs → Uploads');
   assert.equal(await page.locator('.spotify-tracks li strong').textContent(), 'Get Lucky');
+  await page.locator('.spotify-tracks li button').click();
+  assert.equal(await page.locator('.spotify-tracks li button').getAttribute('aria-pressed'), 'false');
+  await page.locator('.spotify-tracks li button').click();
   await page.locator('#spotify-start').click();
   await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.length > 0);
   assert.match(await page.locator('#spotify-progress').textContent(), /плейлистов: 1.*треков.*: 1/);
@@ -601,13 +665,18 @@ try {
   await page.locator('#spotify-dialog [data-close]').click();
   for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport); await overflow();
-    assert.equal(await page.locator('.topbar [data-action="upload"]').isVisible(), true);
+    assert.equal(await page.locator('.topbar [data-action="upload"]').isVisible(), false);
     const mobileBrand = await page.locator('.topbar .brand').boundingBox();
     const mobileSearch = await page.locator('.search-shell').boundingBox();
     const mobileProfile = await page.locator('#profile-toggle').boundingBox();
     assert.ok(mobileSearch.y >= mobileBrand.y + mobileBrand.height, 'mobile search sits below the brand');
-    assert.ok(Math.abs(mobileProfile.y - mobileBrand.y) < 10, 'profile shares the first row with the brand');
-    await page.locator('#open-library').click(); await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click();
+    assert.ok(mobileSearch.y - (mobileProfile.y + mobileProfile.height) >= 10, 'mobile search leaves room below the profile row');
+    assert.ok(Math.abs(mobileProfile.y + mobileProfile.height / 2 - mobileBrand.y - mobileBrand.height / 2) < 2, 'profile shares the first row with the brand');
+    await page.locator('#open-library').click();
+    const mobileUpload = page.locator('#library-dialog [data-action=upload]');
+    assert.equal(await mobileUpload.locator('svg').count(), 1);
+    assert.equal(await mobileUpload.evaluate(button => getComputedStyle(button).borderRadius), '24px');
+    await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click();
     await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
     assert.equal(await page.locator('#library-dialog').isVisible(), false);
     await page.locator('[data-track-menu]').first().click();
