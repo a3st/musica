@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const App = @import("../../app.zig").App;
-const FFmpeg = @import("../../infrastructure/media/ffmpeg.zig").FFmpeg;
 const model = @import("model.zig");
 const service = @import("service.zig");
 const repository = @import("repository.zig");
@@ -12,7 +11,7 @@ const streaming_service = @import("../streaming/service.zig");
 /// Обрабатывает очередь скачивания до отмены; при отсутствии работы ждёт секунду, при ошибке очереди — пять.
 /// Ошибки задачи фиксирует через сервис с выбором допустимости повтора.
 pub fn run(app: *App) anyerror!void {
-    if (!app.imports_enabled) return;
+    if (!app.importsEnabled()) return;
 
     const io = app.storage.io;
 
@@ -87,59 +86,7 @@ fn waitForTimeout(io: std.Io, seconds: u32) anyerror!void {
     try std.Io.sleep(io, .fromSeconds(seconds), .awake);
 }
 
-/// Формирует поиск до пяти кандидатов и сохранение одного MP3 256K с метаданными и обложкой.
-/// Поисковая строка передаётся одним аргументом без shell; результат выделяется в arena.
-pub fn buildYtdlpArguments(app: *App, arena: std.mem.Allocator, track: model.Track) ![]const []const u8 {
-    _ = try model.validateTrack(track);
-
-    const query = try std.fmt.allocPrint(arena, "ytsearch5:{s} {s}", .{
-        std.mem.trim(u8, track.artist, " \t\r\n"),
-        std.mem.trim(u8, track.title, " \t\r\n"),
-    });
-    const max_size = try std.fmt.allocPrint(arena, "{d}", .{app.max_upload_bytes});
-    // No shell, user URL or filename is accepted; the search is always one argv element.
-    return arena.dupe([]const u8, &.{
-        app.ytdlp_path,
-        "--ignore-config",
-        "--no-playlist",
-        "--no-progress",
-        "--no-abort-on-error",
-        "--age-limit",
-        "0",
-        "--max-downloads",
-        "1",
-        "--socket-timeout",
-        "30",
-        "--retries",
-        "2",
-        "--max-filesize",
-        max_size,
-        "--js-runtimes",
-        "node",
-
-        "-f",
-        "bestaudio/best",
-        "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "256K",
-        "--embed-metadata",
-        "--embed-thumbnail",
-        "--convert-thumbnails",
-        "jpg",
-        "--write-thumbnail",
-
-        "--ffmpeg-location",
-        app.ffmpeg.path,
-        "--output",
-        "source.%(ext)s",
-        "--",
-        query,
-    });
-}
-
-/// Скачивает pending-трек через yt-dlp и публикует исходник через tracks_service с проверкой аренды.
+/// Скачивает pending-трек через Downloader и публикует исходник через tracks_service с проверкой аренды.
 /// Для уже загруженного трека пропускает скачивание; ставит подготовку HLS в очередь и завершает задачу.
 fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) anyerror!void {
     if (!tracks_model.isValidId(task.payload.track_id) or
@@ -169,27 +116,13 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
         var dir = try root.openDir(io, task.job.attempt_id.?, .{});
         defer dir.close(io);
 
-        var child = std.process.spawn(io, .{
-            .argv = try buildYtdlpArguments(app, arena, task.payload.track),
-            .cwd = .{ .dir = dir },
-            .stdin = .ignore,
-            .stdout = .ignore,
-            .stderr = .inherit,
-            .create_no_window = true,
-        }) catch |err| {
-            std.log.err("Cannot launch yt-dlp at '{s}': {s}", .{ app.ytdlp_path, @errorName(err) });
+        const track = try model.validateTrack(task.payload.track);
+        const result = try app.downloader.download(arena, io, dir, .{
+            .title = track.title,
+            .artist = track.artist,
+        }, app.max_upload_bytes);
 
-            return err;
-        };
-        defer child.kill(io);
-
-        switch (try child.wait(io)) {
-            // yt-dlp exits with 101 after reaching --max-downloads, including a successful download.
-            .exited => |code| if (code != 0 and code != 101) return error.DownloadFailed,
-            else => return error.DownloadFailed,
-        }
-
-        const data = dir.readFileAlloc(io, "source.mp3", arena, .limited(app.max_upload_bytes)) catch |err| {
+        const data = dir.readFileAlloc(io, result.audio_path, arena, .limited(app.max_upload_bytes)) catch |err| {
             if (err == error.StreamTooLong) return error.FileTooLarge;
             if (err == error.FileNotFound) return error.DownloadFailed;
 
@@ -202,7 +135,7 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
             arena,
             task.payload.user_id,
             task.payload.track_id,
-            "audio/mpeg",
+            result.content_type,
             data,
             task.job,
         );
@@ -214,29 +147,9 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
     std.log.info("Import track downloaded and HLS queued: {s}", .{task.payload.track_id});
 }
 
-test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single argument" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var app: App = undefined;
-    app.max_upload_bytes = 1024;
-    app.ffmpeg = FFmpeg.init("C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe");
-    app.ytdlp_path = "yt-dlp";
-    const argv = try buildYtdlpArguments(&app, arena.allocator(), .{ .title = "Title \"; echo hi", .artist = "Artist" });
-    try std.testing.expectEqualStrings("ytsearch5:Artist Title \"; echo hi", argv[argv.len - 1]);
-    try std.testing.expectEqualStrings("--", argv[argv.len - 2]);
-    var bitrate = false;
-    var cover = false;
-    for (argv, 0..) |arg, index| {
-        if (std.mem.eql(u8, arg, "--audio-quality")) bitrate = std.mem.eql(u8, argv[index + 1], "256K");
-        if (std.mem.eql(u8, arg, "--embed-thumbnail")) cover = true;
-    }
-    try std.testing.expect(bitrate and cover);
-}
-
 test "disabled imports do not claim jobs or launch external processes" {
     var app: App = undefined;
-    app.imports_enabled = false;
+    app.capabilities = .{ .web_search = false, .spotify_import = false };
 
     try run(&app);
 }

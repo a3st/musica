@@ -9,6 +9,7 @@ const S3 = @import("infrastructure/s3.zig").S3;
 const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
 const Probe = @import("infrastructure/media/probe.zig").Probe;
 const FFmpeg = @import("infrastructure/media/ffmpeg.zig").FFmpeg;
+const Downloader = @import("infrastructure/downloader/downloader.zig").Downloader;
 
 const health_routes = @import("features/health/routes.zig");
 const capabilities_routes = @import("features/capabilities/routes.zig");
@@ -40,13 +41,16 @@ pub fn main(init: std.process.Init) !void {
         .catalog = Catalog.init(init.io, init.gpa),
         .probe = Probe.init(config.ffprobe_path),
         .ffmpeg = FFmpeg.init(config.ffmpeg_path),
+        .downloader = Downloader.init(.{
+            .ytdlp_path = config.ytdlp_path,
+            .ffmpeg_path = config.ffmpeg_path,
+            .providers = &.{.yt_dlp},
+        }),
 
         .max_upload_bytes = config.max_upload_bytes,
         .metadata_tmp_dir = config.metadata_tmp_dir,
         .metadata_timeout_seconds = config.metadata_timeout_seconds,
-        .ytdlp_path = config.ytdlp_path,
 
-        .imports_enabled = config.importsEnabled(),
         .imports_tmp_dir = config.imports_tmp_dir,
         .imports_timeout_seconds = config.imports_timeout_seconds,
 
@@ -131,6 +135,8 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("infrastructure/downloader/providers/yt_dlp.zig");
+    _ = @import("infrastructure/downloader/downloader.zig");
     _ = @import("infrastructure/media/ffmpeg.zig");
     _ = @import("infrastructure/media/probe.zig");
     _ = @import("features/capabilities/routes.zig");

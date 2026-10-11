@@ -32,7 +32,7 @@ export class Application {
     spotify_import: false,
   });
   get importsEnabled(): boolean {
-    return this.capabilities.web_search && this.capabilities.spotify_import;
+    return this.capabilities.web_search || this.capabilities.spotify_import;
   }
 
   readonly auth = new AuthState();

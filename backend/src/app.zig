@@ -5,6 +5,7 @@ const S3 = @import("infrastructure/s3.zig").S3;
 const Catalog = @import("infrastructure/catalog/catalog.zig").Catalog;
 const Probe = @import("infrastructure/media/probe.zig").Probe;
 const FFmpeg = @import("infrastructure/media/ffmpeg.zig").FFmpeg;
+const Downloader = @import("infrastructure/downloader/downloader.zig").Downloader;
 const api = @import("helpers/api.zig");
 const capabilities_model = @import("features/capabilities/model.zig");
 
@@ -27,16 +28,15 @@ pub const App = struct {
     probe: Probe,
     /// Обработчик аудио и обложек с настроенным путём к FFmpeg.
     ffmpeg: FFmpeg,
+    /// Общий загрузчик аудио из внешних источников.
+    downloader: Downloader,
 
     /// Максимальный размер тела запроса и загружаемого файла в байтах.
     max_upload_bytes: usize,
 
     metadata_tmp_dir: []const u8,
     metadata_timeout_seconds: u32,
-    ytdlp_path: []const u8,
 
-    /// Разрешает импорт только при одновременно включённых Web и Spotify.
-    imports_enabled: bool,
     imports_tmp_dir: []const u8,
     imports_timeout_seconds: u32,
 
@@ -51,6 +51,11 @@ pub const App = struct {
 
     /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
     shared_track_retention_seconds: u32,
+
+    /// Разрешает импорт, если доступна хотя бы одна интеграция: Web или Spotify.
+    pub fn importsEnabled(self: *const App) bool {
+        return self.capabilities.web_search or self.capabilities.spotify_import;
+    }
 
     /// Возвращает стандартный ответ API для неизвестного маршрута.
     pub fn notFound(_: *App, _: *httpz.Request, res: *httpz.Response) !void {

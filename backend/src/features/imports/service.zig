@@ -6,9 +6,9 @@ const users_repository = @import("../users/repository.zig");
 const model = @import("model.zig");
 const repository = @import("repository.zig");
 
-/// Запрещает импорт при отключении Web или Spotify до создания треков и задач.
+/// Запрещает импорт при отключении обеих интеграций до создания треков и задач.
 pub fn requireEnabled(app: *const App) !void {
-    if (!app.imports_enabled) return error.ImportsDisabled;
+    if (!app.importsEnabled()) return error.ImportsDisabled;
 }
 
 /// Переиспользует или создаёт общий трек у сервисной учётки и ставит загрузку в очередь.
@@ -82,7 +82,7 @@ pub fn fail(db: *database.Database, task: model.Task, retryable: bool) !void {
 
 test "disabled imports reject track creation before accessing the database" {
     var app: App = undefined;
-    app.imports_enabled = false;
+    app.capabilities = .{ .web_search = false, .spotify_import = false };
 
     try std.testing.expectError(error.ImportsDisabled, enqueueTrack(
         &app,

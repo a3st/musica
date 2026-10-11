@@ -79,7 +79,7 @@ pub const FFmpeg = struct {
         manifest_path: []const u8,
         segment_pattern: []const u8,
     ) !void {
-        var child = try spawnFfmpeg(io, .{
+        var child = std.process.spawn(io, .{
             .argv = &.{
                 self.path,
                 "-hide_banner",
@@ -130,7 +130,17 @@ pub const FFmpeg = struct {
             .stdout = .ignore,
             .stderr = .inherit,
             .create_no_window = true,
-        });
+        }) catch |err| {
+            if (err == error.Canceled) return err;
+
+            std.log.warn(
+                "Cannot launch FFmpeg at '{s}': {s}. FFMPEG_PATH must name an executable file, not its directory.",
+                .{ self.path, @errorName(err) },
+            );
+            if (err == error.FileNotFound) return error.FfmpegNotFound;
+
+            return err;
+        };
         defer child.kill(io);
 
         const term = try child.wait(io);
@@ -140,20 +150,6 @@ pub const FFmpeg = struct {
         }
     }
 };
-
-/// Запускает FFmpeg без shell; отсутствие исполняемого файла переводит в FfmpegNotFound.
-fn spawnFfmpeg(io: std.Io, options: std.process.SpawnOptions) !std.process.Child {
-    return std.process.spawn(io, options) catch |err| {
-        if (err == error.Canceled) return err;
-        std.log.warn(
-            "Cannot launch FFmpeg at '{s}': {s}. FFMPEG_PATH must name an executable file, not its directory.",
-            .{ options.argv[0], @errorName(err) },
-        );
-        if (err == error.FileNotFound) return error.FfmpegNotFound;
-
-        return err;
-    };
-}
 
 test "missing FFmpeg executable has a distinct preparation error" {
     const ffmpeg = FFmpeg.init("musica-nonexistent-ffmpeg-0f87633b/ffmpeg");
