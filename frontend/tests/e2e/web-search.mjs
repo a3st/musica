@@ -29,8 +29,9 @@ const playlist = {
   visibility: 'private', is_default: true, image_key: null, role: 'owner', track_count: 0,
 };
 const song = {
-  provider: 'itunes', external_id: '123', title: '<img src=x> (Live Remix)', artist: 'Artist',
-  album: 'Album', artwork_url: 'https://example.com/cover.jpg', source_url: 'https://music.apple.com/us/song/123',
+  provider: process.env.CATALOG_PROVIDER || 'itunes', external_id: '123', title: '<img src=x> (Live Remix)', artist: 'Artist',
+  album: 'Album', artwork_url: 'https://example.com/cover.jpg', source_url: process.env.CATALOG_PROVIDER === 'deezer'
+    ? 'https://www.deezer.com/track/123' : 'https://music.apple.com/us/song/123',
 };
 const tracks = [];
 const catalogTrack = { id: id(3), owner_id: id(9), owner_kind: 'system', title: song.title, artist: song.artist, status: 'pending' };
@@ -111,7 +112,7 @@ await page.route('**/api/**', async route => {
   }
   if (url.pathname === '/api/web/tracks') {
     const selection = request.postDataJSON();
-    assert.equal(selection.provider, 'itunes');
+    assert.equal(selection.provider, song.provider);
     assert.equal(selection.external_id, '123');
     if (selection.add_to_library) {
       additions++;
@@ -332,7 +333,7 @@ try {
   await page.waitForFunction(() => document.querySelector('#search-results')?.textContent?.includes('No songs found'));
   assert.equal(searches.length, beforeDisabled, 'disabled Web integration must not receive searches');
   await page.locator('#search').press('Escape');
-  await page.locator('[data-action="upload"]').click();
+  await page.locator('.topbar [data-action="upload"]').click();
   await page.locator('#upload-dialog[open]').waitFor();
   assert.equal(await page.locator('[data-action="spotify-import"]').count(), 0, 'disabled Spotify integration is hidden');
   assert.deepEqual(errors, []);

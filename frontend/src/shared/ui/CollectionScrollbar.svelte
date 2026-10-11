@@ -1,6 +1,14 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  let { target, label }: { target: HTMLElement | undefined; label: string } = $props();
+  let {
+    target,
+    label,
+    contained = false,
+  }: {
+    target: HTMLElement | undefined;
+    label: string;
+    contained?: boolean;
+  } = $props();
   let rail: HTMLDivElement;
   let thumb: HTMLDivElement;
   let dragging = $state(false);
@@ -10,14 +18,24 @@
     if (!target || !rail || !thumb) return;
     const rect = target.getBoundingClientRect();
     const styles = getComputedStyle(target);
+    // The rail has the same slide animation; its base position excludes the target's translation.
+    const transform = new DOMMatrixReadOnly(
+      styles.transform === 'none' ? undefined : styles.transform,
+    );
     const top = Math.max(8, parseFloat(styles.borderTopRightRadius) || 0);
     const bottom = Math.max(8, parseFloat(styles.borderBottomRightRadius) || 0);
     const height = Math.max(0, rect.height - top - bottom);
     const maximum = target.scrollHeight - target.clientHeight;
     rail.hidden = maximum <= 1 || height < 40;
-    rail.style.top = `${rect.top + top}px`;
-    rail.style.left = `${rect.right - rail.offsetWidth}px`;
+    rail.style.top = `${rect.top - transform.m42 + top}px`;
+    rail.style.left = `${rect.right - transform.m41 - rail.offsetWidth}px`;
     rail.style.height = `${height}px`;
+    if (contained && rail.parentElement) {
+      const parent = rail.parentElement;
+      const parentRect = parent.getBoundingClientRect();
+      rail.style.top = `${rect.top - parentRect.top - parent.clientTop + top}px`;
+      rail.style.left = `${parent.clientWidth - rail.offsetWidth}px`;
+    }
     const length = Math.min(60, Math.max(24, (height * target.clientHeight) / target.scrollHeight));
     travel = height - length;
     thumb.style.height = `${length}px`;
@@ -33,6 +51,7 @@
     const resize = new ResizeObserver(update);
     const mutation = new MutationObserver(update);
     resize.observe(element);
+    if (contained && rail.parentElement) resize.observe(rail.parentElement);
     mutation.observe(element, { childList: true, subtree: true, characterData: true });
     element.addEventListener('scroll', update);
     void tick().then(update);
@@ -69,6 +88,7 @@
 <div
   bind:this={rail}
   class="collection-scrollbar"
+  class:contained
   role="presentation"
   class:dragging
   hidden

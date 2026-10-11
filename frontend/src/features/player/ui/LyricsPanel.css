@@ -1,0 +1,110 @@
+.lyrics-panel {
+  position: fixed;
+  top: calc(var(--topbar-height) + 2 * var(--panel-gap));
+  bottom: calc(var(--player-height) + 2 * var(--panel-gap));
+  left: var(--panel-gap);
+  right: var(--panel-gap);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  overflow: hidden;
+  transform: translateX(calc(100% + 2 * var(--panel-gap)));
+  visibility: hidden;
+  transition:
+    transform 0.3s ease,
+    visibility 0.3s,
+    right 0.24s ease,
+    bottom 0.24s ease;
+}
+
+.lyrics-panel.open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.queue-open .lyrics-panel {
+  right: calc(var(--queue-width) + 2 * var(--panel-gap));
+}
+
+.lyrics-heading {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.lyrics-heading > div {
+  min-width: 0;
+}
+
+.lyrics-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.lyrics-heading p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.lyrics-heading button {
+  flex-shrink: 0;
+}
+
+.lyrics-empty {
+  min-height: 200px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.lyrics-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.lyrics-content::-webkit-scrollbar {
+  display: none;
+}
+
+.lyrics-empty svg {
+  width: 48px;
+  height: 48px;
+}
+
+.lyrics-empty p {
+  margin: 0;
+  font-size: clamp(18px, 3vw, 30px);
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .lyrics-panel {
+    padding: 20px;
+    border-radius: 18px;
+  }
+  .queue-open .lyrics-panel {
+    right: var(--panel-gap);
+    bottom: calc(var(--player-height) + 3 * var(--panel-gap) + var(--middle-height) * 0.46);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-panel {
+    transition: none;
+  }
+}

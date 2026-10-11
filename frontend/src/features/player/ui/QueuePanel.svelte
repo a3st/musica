@@ -1,10 +1,12 @@
 <script lang="ts">
   import Icon from '../../../shared/ui/Icon.svelte';
+  import CollectionScrollbar from '../../../shared/ui/CollectionScrollbar.svelte';
   import TrackArtwork from '../../tracks/ui/TrackArtwork.svelte';
   import type { PlayerState } from '../state.svelte';
   import type { LanguageState } from '../../../shared/i18n/state.svelte';
   import type { Track } from '../../tracks/model';
   let { state: controller, language }: { state: PlayerState; language: LanguageState } = $props();
+  let list = $state<HTMLDivElement>();
 </script>
 
 {#snippet row(track: Track, current = false)}
@@ -42,7 +44,7 @@
       }}><Icon name="close" /></button
     >
   </div>
-  <div id="queue-list">
+  <div id="queue-list" bind:this={list}>
     {#if controller.value.current}<h3>{language.t('queue.nowPlaying')}</h3>
       {@render row(controller.value.current, true)}
       <h3>{language.t('queue.upNext')}</h3>
@@ -54,4 +56,5 @@
         {language.t('queue.emptyHint')}
       </p>{/if}
   </div>
+  <CollectionScrollbar target={list} label={language.t('queue.title')} contained />
 </aside>

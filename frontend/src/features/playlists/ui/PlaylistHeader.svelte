@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Avatar from '../../../shared/ui/Avatar.svelte';
   import CoverArt from './CoverArt.svelte';
   import { playlistDuration } from '../duration';
   import type { Playlist } from '../model';
@@ -9,12 +10,14 @@
     user,
     language,
     canReadImage,
+    shareToken = null,
     menu,
   }: {
     playlist: Playlist;
     user: User | null;
     language: LanguageState;
     canReadImage: boolean;
+    shareToken?: string | null;
     menu: (origin: HTMLElement, point: { x: number; y: number }) => void;
   } = $props();
   const owner = $derived(
@@ -31,7 +34,7 @@
     menu(event.currentTarget, { x: event.clientX, y: event.clientY });
   }}
 >
-  <div class="hero-cover"><CoverArt {playlist} {canReadImage} /></div>
+  <div class="hero-cover"><CoverArt {playlist} {canReadImage} {shareToken} /></div>
   <div class="hero-text">
     <span class="eyebrow"
       >{language.t(playlist.is_default ? 'library.label' : 'playlists.playlistLabel')}</span
@@ -39,9 +42,7 @@
     <h1 id="playlist-title">{playlist.title}</h1>
     {#if playlist.description}<p>{playlist.description}</p>{/if}
     <div class="hero-facts">
-      <span class="owner-avatar">{owner[0].toLocaleUpperCase()}</span><strong>{owner}</strong><span
-        class="fact-dot">·</span
-      ><span
+      <Avatar name={owner} size={24} /><strong>{owner}</strong><span class="fact-dot">·</span><span
         >{language.t('playlists.summary', {
           count: playlist.tracks.length,
           duration: playlistDuration(playlist, language),

@@ -97,6 +97,31 @@ main::-webkit-scrollbar {
 .queue-open main {
   right: calc(var(--queue-width) + 2 * var(--panel-gap));
 }
+
+.library-panels .sidebar,
+.library-panels main,
+.library-panels .workspace > .collection-scrollbar {
+  visibility: visible;
+  transition:
+    transform 0.3s ease,
+    visibility 0.3s,
+    right 0.24s ease;
+}
+
+.lyrics-open .library-panels .sidebar,
+.lyrics-open .library-panels main,
+.lyrics-open .library-panels .workspace > .collection-scrollbar {
+  transform: translateX(calc(-100vw - var(--panel-gap)));
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-panels .sidebar,
+  .library-panels main,
+  .library-panels .workspace > .collection-scrollbar {
+    transition: none;
+  }
+}
 @media (min-width: 761px) and (max-width: 1100px) {
   .queue-open main {
     left: var(--panel-gap);

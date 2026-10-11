@@ -28,6 +28,7 @@
   });
   $effect(() => {
     document.querySelector('#app')?.classList.toggle('queue-open', app.player.queueOpen);
+    document.querySelector('#app')?.classList.toggle('lyrics-open', app.player.lyricsOpen);
   });
   $effect(() => {
     document.title = app.library.selected
@@ -57,6 +58,11 @@
   });
   function keydown(event: KeyboardEvent): void {
     if (event.defaultPrevented || app.menu.opened) return;
+    if (event.key === 'Escape' && app.player.lyricsOpen) {
+      app.player.lyricsOpen = false;
+      document.querySelector<HTMLButtonElement>('#lyrics-toggle')?.focus();
+      return;
+    }
     if (event.key === 'Escape' && app.player.queueOpen) app.player.queueOpen = false;
     if (
       event.code === 'Space' &&

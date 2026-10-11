@@ -3,6 +3,7 @@ const std = @import("std");
 /// Провайдеры, поддерживаемые поисковым каталогом.
 pub const Provider = enum {
     itunes,
+    deezer,
 };
 
 /// Поисковый источник с готовым ключом кеша; ключ живёт до освобождения arena.
@@ -32,7 +33,7 @@ pub const SearchTrack = struct {
     source_url: ?[]const u8 = null,
 };
 
-/// Принимает положительный числовой ID iTunes без URL и произвольных параметров.
+/// Принимает положительный числовой ID каталога без URL и произвольных параметров.
 pub fn validateExternalId(id: []const u8) !void {
     if (id.len == 0 or id.len > 20) return error.InvalidInput;
 

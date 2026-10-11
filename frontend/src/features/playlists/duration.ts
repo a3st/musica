@@ -15,9 +15,11 @@ export function playlistDuration(
   const formatted =
     hours > 0
       ? language.t('duration.hoursMinutes', { hours, minutes })
-      : minutes > 0
-        ? language.t('duration.minutesSeconds', { minutes, seconds })
-        : language.t('duration.seconds', { seconds });
+      : seconds === 0
+        ? language.t('duration.minutes', { minutes })
+        : minutes > 0
+          ? language.t('duration.minutesSeconds', { minutes, seconds })
+          : language.t('duration.seconds', { seconds });
 
   return playlist.duration_complete
     ? formatted

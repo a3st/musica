@@ -1,5 +1,6 @@
 import { t } from '../../shared/i18n';
 import { errorMessage } from '../../shared/api/errors';
+import { readPreference, writePreference } from '../../shared/utils/storage';
 import type Hls from 'hls.js';
 import { tracksApi as api } from '../tracks/api';
 import type { Track } from '../tracks/model';
@@ -23,6 +24,15 @@ export class PlayerEngine {
     private readonly shareToken: (id: string) => string | null,
   ) {
     this.audio.preload = 'metadata';
+    const storedVolume = readPreference('musica:volume');
+    const volume = storedVolume === null ? NaN : Number(storedVolume);
+    if (storedVolume?.trim() && Number.isFinite(volume) && volume >= 0 && volume <= 100)
+      this.audio.volume = volume / 100;
+    this.audio.muted = readPreference('musica:muted') === 'true';
+
+    this.audio.addEventListener('volumechange', () => this.saveVolume(), {
+      signal: this.listeners.signal,
+    });
     for (const event of [
       'play',
       'pause',
@@ -99,14 +109,23 @@ export class PlayerEngine {
     this.emit();
   }
   volume(value: number): void {
+    if (!Number.isFinite(value)) return;
     this.audio.volume = Math.max(0, Math.min(1, value / 100));
     if (this.audio.volume > 0) this.audio.muted = false;
+    this.saveVolume();
     this.emit();
   }
   mute(): void {
     this.audio.muted = !(this.audio.muted || this.audio.volume === 0);
     if (!this.audio.muted && this.audio.volume === 0) this.audio.volume = 0.5;
+    this.saveVolume();
     this.emit();
+  }
+
+  /** Сохраняет громкость отдельно от mute, чтобы выключение звука не теряло уровень. */
+  private saveVolume(): void {
+    writePreference('musica:volume', String(Math.round(this.audio.volume * 100)));
+    writePreference('musica:muted', String(this.audio.muted));
   }
   toggleShuffle(): void {
     this.shuffle = !this.shuffle;

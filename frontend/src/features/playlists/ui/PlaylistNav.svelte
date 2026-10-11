@@ -61,7 +61,12 @@
         menu(playlist, event.currentTarget, { x: event.clientX, y: event.clientY });
       }}
     >
-      <span class="nav-cover"><CoverArt {playlist} mini /></span><span
+      <span class="nav-cover"
+        ><CoverArt
+          playlist={controller.selected?.id === playlist.id ? controller.selected : playlist}
+          mini
+        /></span
+      ><span
         ><strong>{playlist.title}</strong><small
           >{playlist.is_default
             ? language.t('playlists.allUploads')

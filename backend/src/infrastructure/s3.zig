@@ -1,6 +1,7 @@
 const std = @import("std");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
+const retry = @import("../helpers/retry.zig");
 
 /// Настройки S3; строки из load ссылаются на переданную карту окружения.
 pub const Settings = struct {
@@ -46,7 +47,7 @@ pub const Settings = struct {
     }
 };
 
-/// Владеет HTTP-клиентом с пулом соединений для подписанных S3-запросов.
+/// Владеет общим HTTP-клиентом; соединение закрывается после каждого S3-запроса.
 /// После первого запроса структура должна оставаться по стабильному адресу.
 pub const S3 = struct {
     client: std.http.Client,
@@ -91,7 +92,7 @@ pub const S3 = struct {
     }
 
     /// Проверяет путь и загружает объект в указанный бакет с подписью SigV4.
-    /// Общий таймаут, включая один повтор закрытого соединения, задаётся timeout_ms.
+    /// Общий таймаут, включая до трёх попыток и задержки, задаётся timeout_ms.
     pub fn putInBucket(
         self: *S3,
         arena: std.mem.Allocator,
@@ -132,7 +133,7 @@ pub const S3 = struct {
     }
 
     /// Удаляет объект из указанного бакета подписанным DELETE; ожидает HTTP 204.
-    /// Операция, включая один повтор закрытого соединения, ограничена timeout_ms.
+    /// Операция, включая до трёх попыток и задержки, ограничена timeout_ms.
     pub fn deleteInBucket(self: *S3, arena: std.mem.Allocator, bucket: []const u8, key: []const u8) !void {
         try validateBucket(bucket);
         try validateKey(key);
@@ -199,7 +200,27 @@ pub const S3 = struct {
         return writer.buffered();
     }
 
-    /// Выполняет GET и повторяет его один раз только при HttpConnectionClosing.
+    /// Контекст GET; callback очищает частичный ответ перед каждой попыткой.
+    const GetContext = struct {
+        storage: *S3,
+        url: []const u8,
+        host: []const u8,
+        signed: Signed,
+        timestamp: []const u8,
+        writer: *std.Io.Writer,
+
+        /// Начинает ответ заново, сохраняя выделенный буфер.
+        fn beforeAttempt(self: *GetContext, _: u8) !void {
+            self.writer.end = 0;
+        }
+
+        /// Выполняет одну попытку чтения объекта.
+        fn perform(self: *GetContext) !void {
+            try self.storage.getOnce(self.url, self.host, self.signed, self.timestamp, self.writer);
+        }
+    };
+
+    /// Выполняет до трёх GET-попыток при временных сетевых ошибках через общий клиент.
     fn getWithRetry(
         self: *S3,
         url: []const u8,
@@ -208,15 +229,19 @@ pub const S3 = struct {
         timestamp: []const u8,
         writer: *std.Io.Writer,
     ) anyerror!void {
-        self.getOnce(url, host, signed, timestamp, writer) catch |err| {
-            if (err != error.HttpConnectionClosing) return err;
-            // No response headers or body arrived; the failed connection was discarded.
-            std.log.debug("S3 GetObject connection closed before response; retrying once", .{});
-            try self.getOnce(url, host, signed, timestamp, writer);
+        var context: GetContext = .{
+            .storage = self,
+            .url = url,
+            .host = host,
+            .signed = signed,
+            .timestamp = timestamp,
+            .writer = writer,
         };
+
+        try retry.run(self.io, .{}, &context, GetContext.beforeAttempt, GetContext.perform, shouldRetryGet);
     }
 
-    /// Выполняет один подписанный GET через общий HTTP-клиент без перехода по редиректам.
+    /// Выполняет GET через общий клиент без keep-alive и перехода по редиректам.
     fn getOnce(
         self: *S3,
         url: []const u8,
@@ -230,7 +255,7 @@ pub const S3 = struct {
             .method = .GET,
             .response_writer = writer,
             .redirect_behavior = .unhandled,
-            .keep_alive = true,
+            .keep_alive = false,
             .headers = .{
                 .host = .{ .override = host },
                 .authorization = .{ .override = signed.authorization },
@@ -248,7 +273,27 @@ pub const S3 = struct {
         }
     }
 
-    /// Выполняет PUT или DELETE, повторяя тот же запрос один раз при HttpConnectionClosing.
+    /// Контекст идемпотентной отправки: все попытки используют одинаковый ключ и тело.
+    const SendContext = struct {
+        storage: *S3,
+        url: []const u8,
+        host: []const u8,
+        mime: []const u8,
+        data: []const u8,
+        signed: Signed,
+        timestamp: []const u8,
+        method: std.http.Method,
+
+        /// PUT и DELETE не накапливают ответ; дополнительная подготовка не требуется.
+        fn beforeAttempt(_: *SendContext, _: u8) !void {}
+
+        /// Выполняет одну отправку; запрос и соединение освобождаются внутри sendOnce.
+        fn perform(self: *SendContext) !void {
+            try self.storage.sendOnce(self.url, self.host, self.mime, self.data, self.signed, self.timestamp, self.method);
+        }
+    };
+
+    /// Выполняет до трёх PUT/DELETE-попыток при временных сетевых ошибках через общий клиент.
     fn sendWithRetry(
         self: *S3,
         url: []const u8,
@@ -259,12 +304,18 @@ pub const S3 = struct {
         timestamp: []const u8,
         method: std.http.Method,
     ) anyerror!void {
-        self.sendOnce(url, host, mime, data, signed, timestamp, method) catch |err| {
-            if (err != error.HttpConnectionClosing) return err;
-            // PUT of the same bytes/key and DELETE are idempotent. Keep the original deadline.
-            std.log.debug("S3 {s} connection closed before response; retrying once", .{@tagName(method)});
-            try self.sendOnce(url, host, mime, data, signed, timestamp, method);
+        var context: SendContext = .{
+            .storage = self,
+            .url = url,
+            .host = host,
+            .mime = mime,
+            .data = data,
+            .signed = signed,
+            .timestamp = timestamp,
+            .method = method,
         };
+
+        try retry.run(self.io, .{}, &context, SendContext.beforeAttempt, SendContext.perform, shouldRetrySend);
     }
 
     /// Выполняет одну отправку, освобождает запрос и проверяет HTTP-статус без перехода по редиректам.
@@ -279,9 +330,17 @@ pub const S3 = struct {
         timestamp: []const u8,
         method: std.http.Method,
     ) anyerror!void {
+        const Stage = enum { connect, send_body, receive_headers, read_response };
+        var stage: Stage = .connect;
+        errdefer |err| if (err != error.Canceled) {
+            std.log.debug("S3 {s} failed at {s}: {s}", .{
+                @tagName(method), @tagName(stage), @errorName(err),
+            });
+        };
+
         var request = try self.client.request(method, try std.Uri.parse(url), .{
             .redirect_behavior = .unhandled,
-            .keep_alive = true,
+            .keep_alive = false,
             .headers = .{
                 .host = .{ .override = host },
                 .authorization = .{ .override = signed.authorization },
@@ -299,6 +358,7 @@ pub const S3 = struct {
             connection.closing = true;
         };
 
+        stage = .send_body;
         if (method == .PUT) {
             request.transfer_encoding = .{ .content_length = data.len };
             var body = try request.sendBodyUnflushed(&.{});
@@ -309,6 +369,7 @@ pub const S3 = struct {
             try request.sendBodiless();
         }
 
+        stage = .receive_headers;
         var response = try request.receiveHead(&.{});
         const status = response.head.status;
 
@@ -321,6 +382,7 @@ pub const S3 = struct {
             request.response_content_length = 0;
         }
 
+        stage = .read_response;
         const reader = response.reader(&.{});
         _ = reader.discardRemaining() catch return response.bodyErr() orelse error.ReadFailed;
 
@@ -332,6 +394,30 @@ pub const S3 = struct {
         }
     }
 };
+
+/// Повторяет сетевые сбои GET; WriteFailed может означать переполнение буфера и не повторяется.
+fn shouldRetryGet(err: anyerror) bool {
+    return switch (err) {
+        error.HttpConnectionClosing,
+        error.HttpRequestTruncated,
+        error.HttpChunkTruncated,
+        error.ConnectionResetByPeer,
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.Timeout,
+        error.BrokenPipe,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        error.ReadFailed,
+        => true,
+        else => false,
+    };
+}
+
+/// Для отправки тела WriteFailed также считается временной сетевой ошибкой.
+fn shouldRetrySend(err: anyerror) bool {
+    return err == error.WriteFailed or shouldRetryGet(err);
+}
 
 /// Проверяет допустимое имя бакета для файловых операций; иначе InvalidBucket.
 fn validateBucket(bucket: []const u8) !void {
@@ -657,13 +743,17 @@ fn required(env: *const std.process.Environ.Map, name: []const u8) ![]const u8 {
 }
 
 /// Проверяет метод тестового HTTP-запроса и считывает его заголовки и фиксированное тело PUT.
-fn readStorageRequest(reader: *std.Io.Reader, method: std.http.Method) !void {
+fn readStorageRequest(reader: *std.Io.Reader, method: std.http.Method, expect_close: bool) !void {
     const line = (try reader.takeDelimiter('\n')) orelse return error.EndOfStream;
     try std.testing.expect(std.mem.startsWith(u8, line, @tagName(method)));
+    var connection_close = false;
     while (true) {
         const header = (try reader.takeDelimiter('\n')) orelse return error.EndOfStream;
         if (std.mem.eql(u8, header, "\r")) break;
+        if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, header, " \t\r"), "connection: close"))
+            connection_close = true;
     }
+    try std.testing.expectEqual(expect_close, connection_close);
     if (method == .PUT) {
         var payload: [4]u8 = undefined;
         try reader.readSliceAll(&payload);
@@ -671,7 +761,7 @@ fn readStorageRequest(reader: *std.Io.Reader, method: std.http.Method) !void {
     }
 }
 
-/// Тестовый сервер: закрывает переиспользованное соединение и проверяет один повтор запроса.
+/// Проверяет отдельные соединения; закрывает первую попытку либо все три без ответа.
 fn closingStorage(io: std.Io, server: *std.Io.net.Server, method: std.http.Method, close_retry: bool) !void {
     {
         const stream = try server.accept(io);
@@ -680,29 +770,32 @@ fn closingStorage(io: std.Io, server: *std.Io.net.Server, method: std.http.Metho
         var reader = stream.reader(io, &read_buffer);
         var write_buffer: [256]u8 = undefined;
         var writer = stream.writer(io, &write_buffer);
-        try readStorageRequest(&reader.interface, .PUT);
+        try readStorageRequest(&reader.interface, .PUT, true);
         try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
         try writer.interface.flush();
-        try readStorageRequest(&reader.interface, method);
     }
-    const stream = try server.accept(io);
-    defer stream.close(io);
-    var read_buffer: [4096]u8 = undefined;
-    var reader = stream.reader(io, &read_buffer);
-    try readStorageRequest(&reader.interface, method);
-    if (close_retry) return;
-    var write_buffer: [256]u8 = undefined;
-    var writer = stream.writer(io, &write_buffer);
-    try writer.interface.writeAll(switch (method) {
-        .GET => "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
-        .DELETE => "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        .PUT => "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        else => unreachable,
-    });
-    try writer.interface.flush();
+    for (0..3) |attempt| {
+        const stream = try server.accept(io);
+        defer stream.close(io);
+        var read_buffer: [4096]u8 = undefined;
+        var reader = stream.reader(io, &read_buffer);
+        try readStorageRequest(&reader.interface, method, true);
+        if (attempt == 0 or close_retry) continue;
+
+        var write_buffer: [256]u8 = undefined;
+        var writer = stream.writer(io, &write_buffer);
+        try writer.interface.writeAll(switch (method) {
+            .GET => "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
+            .DELETE => "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            .PUT => "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            else => unreachable,
+        });
+        try writer.interface.flush();
+        return;
+    }
 }
 
-test "S3 retries a closed keep-alive connection once for PUT GET DELETE" {
+test "S3 disables keep-alive and retries transient failures up to three attempts" {
     const io = std.testing.io;
     for ([_]std.http.Method{ .PUT, .GET, .DELETE, .PUT }, 0..) |method, index| {
         const address: std.Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 0 } };

@@ -8,7 +8,7 @@ export interface SearchResult {
 }
 
 export interface SearchTrack {
-  provider: 'itunes';
+  provider: 'itunes' | 'deezer';
   external_id: string;
   title: string;
   artist: string;
@@ -37,7 +37,10 @@ export function parseSearchTracks(value: unknown): SearchTrack[] {
   return rows.map((row) => {
     const item = record(row);
     const id = text(item.external_id);
-    if (item.provider !== 'itunes' || !/^[1-9][0-9]{0,19}$/.test(id))
+    if (
+      (item.provider !== 'itunes' && item.provider !== 'deezer') ||
+      !/^[1-9][0-9]{0,19}$/.test(id)
+    )
       throw new Error(t('errors.invalidData'));
     const key = searchTrackKey({ provider: item.provider, external_id: id });
     if (ids.has(key)) throw new Error(t('errors.invalidData'));

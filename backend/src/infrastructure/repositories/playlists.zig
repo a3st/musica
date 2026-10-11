@@ -40,7 +40,7 @@ const json_playlist =
     \\)::text
 ;
 
-/// Возвращает JSON списка собственных и доступных по членству плейлистов с ролями и числом треков.
+/// Возвращает доступные плейлисты с ролями, длительностью и первыми четырьмя треками для обложки.
 pub fn list(conn: *database.Connection, arena: std.mem.Allocator, user: []const u8) ![]const u8 {
     const query =
         \\SELECT COALESCE(json_agg(item
@@ -59,7 +59,16 @@ pub fn list(conn: *database.Connection, arena: std.mem.Allocator, user: []const 
         \\            FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
         \\            WHERE tp.playlist_id = a.id), 'duration_complete', NOT EXISTS (
         \\            SELECT 1 FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
-        \\            WHERE tp.playlist_id = a.id AND t.duration_seconds IS NULL)) AS item
+        \\            WHERE tp.playlist_id = a.id AND t.duration_seconds IS NULL),
+        \\        'cover_tracks', COALESCE((
+        \\            SELECT json_agg(json_build_object('id', preview.id, 'artwork_key', preview.artwork_key)
+        \\                ORDER BY preview.created_at, preview.id)
+        \\            FROM (
+        \\                SELECT t.id, t.artwork_key, t.created_at
+        \\                FROM musica.tracks t JOIN musica.track_playlists tp ON tp.track_id = t.id
+        \\                WHERE tp.playlist_id = a.id
+        \\                ORDER BY t.created_at, t.id LIMIT 4
+        \\            ) preview), '[]'::json)) AS item
         \\    FROM musica.playlists a
         \\    LEFT JOIN musica.playlist_members m
         \\    ON m.playlist_id = a.id

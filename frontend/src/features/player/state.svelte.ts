@@ -15,6 +15,7 @@ export class PlayerState {
   });
   cover = $state<Playlist | null>(null);
   queueOpen = $state(false);
+  lyricsOpen = $state(false);
   readonly engine: PlayerEngine;
   constructor(
     notify: (message: string) => void,
@@ -29,6 +30,7 @@ export class PlayerState {
       userId,
       shareToken,
     );
+    this.value = this.engine.snapshot();
   }
   dispose(): void {
     this.engine.dispose();

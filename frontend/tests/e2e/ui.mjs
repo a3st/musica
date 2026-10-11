@@ -87,7 +87,8 @@ await page.route('**/api/**', async (route) => {
     if (expireLibrary) return json({ error: 'unauthorized' }, 401);
     if (failLibrary) return json({ error: 'internal_error' }, 500);
     if (libraryDelay) await new Promise(resolve => setTimeout(resolve, libraryDelay));
-    return json(playlists.map((p) => ({ ...p, track_count: members.get(p.id).length })));
+    return json(playlists.map((p) => ({ ...p, track_count: members.get(p.id).length,
+      cover_tracks: members.get(p.id).slice(0, 4).map(track => ({ id: track.id, artwork_key: track.artwork_key ?? null })) })));
   }
   if (path === `/api/playlists/${id(3)}/share-link` && method === 'POST') return json({ path: '/api/shared/playlists/' + 'a'.repeat(64) });
   if (path === '/api/shared/playlists/' + 'a'.repeat(64)) return json({ ...playlists.find(p => p.id === id(3)), tracks: members.get(id(3)) });
@@ -161,6 +162,24 @@ await page.route('**/api/**', async (route) => {
 const toggleTheme = async () => { await page.locator('#profile-toggle').click(); await page.locator('#theme-toggle').click(); await page.keyboard.press('Escape'); };
 const openSpotify = async () => { if (await page.locator('.sidebar').isVisible()) await page.locator('.topbar [data-action=upload]').click(); else { await page.locator('#open-library').click(); await page.locator('#library-dialog [data-action=upload]').click(); } await page.locator('#upload-dialog [data-action=spotify-import]').click(); };
 const overflow = async () => assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'horizontal overflow');
+const checkPanelScrollbar = async (panelId, contentId) => {
+  const panel = page.locator(panelId);
+  const content = page.locator(contentId);
+  assert.equal(await content.evaluate(element => getComputedStyle(element).scrollbarWidth), 'none');
+  const scrollable = await content.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+  if (!scrollable) return;
+  const rail = panel.locator('.collection-scrollbar');
+  await rail.waitFor();
+  const bounds = await panel.boundingBox();
+  const railBounds = await rail.boundingBox();
+  const thumb = rail.locator('.collection-scrollbar-thumb');
+  assert.ok(Math.abs(railBounds.x + railBounds.width - bounds.x - bounds.width) <= 1, 'panel scrollbar sits at the right border');
+  assert.ok((await thumb.boundingBox()).height <= 60, 'panel scrollbar uses the compact thumb');
+  await thumb.focus();
+  await page.keyboard.press('End');
+  assert.ok(await content.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1), 'panel scrollbar supports keyboard scrolling');
+  await page.keyboard.press('Home');
+};
 try {
   await page.goto(base);
   await page.locator('h1').filter({ hasText: 'Uploads' }).waitFor({ timeout: 10000 }).catch(async error => { console.error('Startup UI:', await page.locator('body').innerText()); throw error; });
@@ -209,6 +228,8 @@ try {
   await page.keyboard.press('Escape');
   playlists.find(p => p.id === id(3)).visibility = 'unlisted';
   await page.reload(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  assert.equal(await page.locator('#volume').inputValue(), '37', 'volume survives page reload');
+  assert.equal(await page.locator('#volume').evaluate(input => input.style.getPropertyValue('--progress')), '37%', 'restored volume is reflected in the bar');
   await page.locator(`.sidebar [data-playlist="${id(3)}"]`).click({ button: 'right' });
   await page.locator('#share-playlist').click();
   await page.waitForFunction(() => document.querySelector('#toast').textContent === 'Ссылка скопирована');
@@ -249,7 +270,7 @@ try {
   await staleResponse;
   await page.waitForTimeout(100);
   assert.equal(await page.locator('.auth-placeholder').count(), 0, 'a stale auth failure cannot reset the new session');
-  assert.equal(await page.locator('.avatar-label').textContent(), 'M');
+  assert.equal(await page.locator('.profile-toggle .initial-avatar').textContent(), 'M');
   assert.equal(await page.locator('.track-row').count(), 1, 'a stale auth failure cannot clear the playlist');
   await page.goto(base); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
 
@@ -279,13 +300,13 @@ try {
   await page.keyboard.press('End'); for (let n=0;n<6;n++) await page.keyboard.press('ArrowLeft');
   assert.equal(await handle.getAttribute('aria-valuenow'), '244');
   await page.setViewportSize({ width: 1440, height: 400 });
-  const thumb = page.locator('.collection-scrollbar-thumb'); await thumb.waitFor();
+  const thumb = page.locator('.workspace .collection-scrollbar-thumb'); await thumb.waitFor();
   assert.ok((await thumb.boundingBox()).height <= 60, 'compact scrollbar thumb');
   await thumb.focus(); await page.keyboard.press('End');
-  await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
+  await page.waitForFunction(() => document.querySelector('.workspace .collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
   await page.keyboard.press('Home');
   await page.waitForFunction(() => document.querySelector('#collection').scrollTop === 0);
-  const railBox = await page.locator('.collection-scrollbar').boundingBox(); const thumbBox = await thumb.boundingBox();
+  const railBox = await page.locator('.workspace > .collection-scrollbar').boundingBox(); const thumbBox = await thumb.boundingBox();
   const collectionBox = await page.locator('#collection').boundingBox();
   assert.equal(railBox.width, 8, 'playlist scrollbar is thicker');
   const corners = await page.locator('#collection').evaluate(element => {
@@ -296,7 +317,7 @@ try {
   assert.ok(railBox.y + railBox.height <= collectionBox.y + collectionBox.height - corners.bottom, 'playlist thumb clears the bottom rounded corner');
   assert.ok(Math.abs(railBox.x + railBox.width - collectionBox.x - collectionBox.width) < 1, 'playlist scrollbar is flush with the panel edge');
   await page.mouse.move(thumbBox.x + 3, thumbBox.y + thumbBox.height / 2); await page.mouse.down(); await page.mouse.move(railBox.x + 3, railBox.y + railBox.height); await page.mouse.up();
-  await page.waitForFunction(() => document.querySelector('.collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
+  await page.waitForFunction(() => document.querySelector('.workspace .collection-scrollbar-thumb').getAttribute('aria-valuenow') === '100');
   await thumb.focus(); await page.keyboard.press('Home');
   const navBox = await page.locator('.sidebar .playlist-nav').boundingBox();
   await page.mouse.move(navBox.x + navBox.width / 2, navBox.y + navBox.height / 2); await page.mouse.wheel(0, 250);
@@ -334,6 +355,23 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-track-row="00000000-0000-4000-8000-000000000011"] .track-art img'));
   assert.equal(await page.locator(`[data-track-row="${id(12)}"] .track-art img`).count(), 0, 'tracks without artwork use a placeholder');
   const rowsBeforeSearch = await page.locator('.track-row').count();
+  assert.equal(await page.locator('.hero-cover .uploads-art svg').count(), 1);
+  assert.equal(await page.locator('.profile-toggle .initial-avatar').textContent(), 'M');
+  assert.ok(await page.locator(`[data-playlist="${id(3)}"] .cover-mosaic img`).count() > 0, 'sidebar cover uses track artwork before opening the playlist');
+  await page.locator('.topbar').hover();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.track-more')).opacity === '0');
+  assert.equal(await page.locator('.track-table-heading').textContent().then(text => /Action|Действия/.test(text)), false);
+  await page.locator('.track-row').first().hover();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.track-more')).opacity === '1');
+  await page.locator('#search').fill('m83'); await page.locator('.search-result[data-source=local]').waitFor();
+  await page.locator('.topbar').hover();
+  const clearColor = await page.locator('.search-clear').evaluate(element => getComputedStyle(element).color);
+  await page.locator('.search-clear').hover();
+  await page.waitForFunction(color => getComputedStyle(document.querySelector('.search-clear')).color !== color, clearColor);
+  await page.locator('.search-clear').click();
+  assert.equal(await page.locator('#search').inputValue(), '');
+  assert.equal(await page.locator('.search-clear').count(), 0);
+  assert.equal(await page.locator('#search').evaluate(element => document.activeElement === element), true);
   await page.locator('#search').fill('m83'); await page.locator('.search-result[data-source=local]').waitFor();
   await page.waitForFunction(() => document.querySelector('.search-result[data-source=local] img')?.naturalWidth > 0);
   assert.equal(await page.locator('.track-row').count(), rowsBeforeSearch, 'dropdown search leaves the playlist unchanged');
@@ -402,6 +440,29 @@ try {
   assert.equal(await page.locator('#queue-panel').getAttribute('inert'), null);
   assert.equal(await page.locator('[data-queue-play]').count(), 2);
   await page.waitForFunction(() => document.querySelector('#queue-panel .queue-current img')?.naturalWidth > 0);
+  await page.locator('#lyrics-toggle').click();
+  await page.locator('#lyrics-panel.open').waitFor();
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#lyrics-panel')).transform === 'matrix(1, 0, 0, 1, 0, 0)');
+  assert.equal(await page.locator('#lyrics-panel').getAttribute('inert'), null);
+  assert.equal(await page.locator('.library-panels').getAttribute('inert'), '', 'lyrics blocks interaction with the outgoing library');
+  assert.equal(await page.locator('#lyrics-panel').getByText('Текст песни пока недоступен').isVisible(), true);
+  const lyricsBounds = await page.locator('#lyrics-panel').boundingBox();
+  const queueBounds = await page.locator('#queue-panel').boundingBox();
+  assert(lyricsBounds.x + lyricsBounds.width + 7 <= queueBounds.x, 'lyrics shares space with the queue');
+  assert.equal(await page.locator('#queue-panel').evaluate(panel => panel.closest('[inert]')), null, 'queue stays interactive next to lyrics');
+  await page.waitForFunction(() => document.querySelector('#collection').getBoundingClientRect().right <= 0);
+  await page.locator('#queue-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#lyrics-panel').getBoundingClientRect().right >= innerWidth - 9);
+  await page.locator('#queue-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#lyrics-panel').getBoundingClientRect().right + 7 <= document.querySelector('#queue-panel').getBoundingClientRect().left);
+  await overflow();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#lyrics-toggle').getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.locator('.library-panels').getAttribute('inert'), null);
+  assert.equal(await page.locator('#queue-panel').getAttribute('inert'), null, 'closing lyrics preserves the queue');
+  await page.locator('#lyrics-toggle').click();
+  await page.locator('#lyrics-close').click();
+  assert.equal(await page.locator('#lyrics-toggle').evaluate((button) => document.activeElement === button), true);
   await page.locator(`[data-queue-remove="${id(11)}"]`).click();
   assert.equal(await page.locator('[data-queue-play]').count(), 1);
   await page.locator(`[data-track-row="${id(11)}"]`).click({ button: 'right' });
@@ -521,8 +582,13 @@ try {
     { name: 'YourLibrary.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ tracks: [{ track: 'Get Lucky', artist: 'Daft Punk', uri }] })) },
   ]);
   await page.getByText('1 уникальных треков · 1 плейлистов', { exact: true }).waitFor();
+  assert.equal(await page.locator('.spotify-preview img').count(), 0, 'Spotify preview shows text only');
+  await page.getByRole('button', { name: /Liked Songs → Uploads/ }).click();
+  assert.equal(await page.locator('.spotify-tracks h3').textContent(), 'Liked Songs → Uploads');
+  assert.equal(await page.locator('.spotify-tracks li strong').textContent(), 'Get Lucky');
   await page.locator('#spotify-start').click();
   await page.waitForFunction(() => document.querySelector('#spotify-progress').textContent.length > 0);
+  assert.match(await page.locator('#spotify-progress').textContent(), /плейлистов: 1.*треков.*: 1/);
   assert.equal(await page.locator('#spotify-retry').count(), 0);
   assert.equal(await page.locator('#spotify-start').isDisabled(), true);
   assert.equal(mutations.filter((m) => m.path === '/api/spotify/import').length, 1);
@@ -535,7 +601,12 @@ try {
   await page.locator('#spotify-dialog [data-close]').click();
   for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport); await overflow();
-    assert.equal(await page.locator('.topbar [data-action="upload"]').isVisible(), false);
+    assert.equal(await page.locator('.topbar [data-action="upload"]').isVisible(), true);
+    const mobileBrand = await page.locator('.topbar .brand').boundingBox();
+    const mobileSearch = await page.locator('.search-shell').boundingBox();
+    const mobileProfile = await page.locator('#profile-toggle').boundingBox();
+    assert.ok(mobileSearch.y >= mobileBrand.y + mobileBrand.height, 'mobile search sits below the brand');
+    assert.ok(Math.abs(mobileProfile.y - mobileBrand.y) < 10, 'profile shares the first row with the brand');
     await page.locator('#open-library').click(); await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click();
     await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
     assert.equal(await page.locator('#library-dialog').isVisible(), false);
@@ -549,6 +620,15 @@ try {
     await page.screenshot({ path: `../backend/.zig-cache/ui-mobile-${viewport.width}.png` });
     await page.locator('#queue-toggle').click(); await page.locator('#queue-panel.open').waitFor(); await overflow();
     await page.waitForFunction(() => document.querySelector('#collection').getBoundingClientRect().bottom + 5 <= document.querySelector('#queue-panel').getBoundingClientRect().top);
+    await page.locator('#lyrics-toggle').click();
+    await page.waitForFunction(() => document.querySelector('#lyrics-panel').getBoundingClientRect().bottom + 5 <= document.querySelector('#queue-panel').getBoundingClientRect().top && getComputedStyle(document.querySelector('#lyrics-panel')).transform === 'matrix(1, 0, 0, 1, 0, 0)');
+    await checkPanelScrollbar('#lyrics-panel', '#lyrics-content');
+    await checkPanelScrollbar('#queue-panel', '#queue-list');
+    await overflow();
+    await page.locator('#queue-close').click();
+    await page.waitForFunction(() => document.querySelector('#lyrics-panel').getBoundingClientRect().bottom >= document.querySelector('.player').getBoundingClientRect().top - 10);
+    await page.locator('#lyrics-close').click();
+    await page.locator('#queue-toggle').click();
     await page.locator('#queue-close').click();
     await page.locator('#open-library').click(); await page.locator(`#library-dialog [data-playlist="${id(2)}"]`).click({ button: 'right' });
     assert.equal(await page.locator('#delete-playlist').isDisabled(), true);

@@ -149,6 +149,17 @@
         }}
       />
     </label>
+    {#if controller.query}
+      <button
+        type="button"
+        class="search-clear"
+        aria-label={language.t('search.clear')}
+        onclick={() => {
+          controller.setQuery('');
+          input.focus();
+        }}><Icon name="close" /></button
+      >
+    {/if}
   </form>
   {#if controller.open}
     <div
@@ -234,7 +245,9 @@
                         ? 'search.library'
                         : result.kind === 'service'
                           ? 'search.service'
-                          : 'search.itunes',
+                          : result.track.provider === 'deezer'
+                            ? 'search.deezer'
+                            : 'search.itunes',
                     )}</span
                   >
                 </span>

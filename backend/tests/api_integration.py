@@ -599,6 +599,12 @@ def run_api_checks(optimize="Debug", backend_image=None):
             expected=201,
         )["id"]
         assert execute_sql(f"SELECT count(*) FROM musica.track_playlists WHERE track_id='{combined}'") == "2"
+        playlist_tracks = api_request('GET', path, token=a)['tracks']
+        listed = next(item for item in api_request('GET', '/api/playlists', token=a) if item['id'] == playlist)
+        assert listed['cover_tracks'] == [
+            {'id': track['id'], 'artwork_key': track['artwork_key']}
+            for track in playlist_tracks[:4]
+        ], 'playlist cover preview follows the track order without exposing full metadata'
         cover = b"\x89PNG\r\n\x1a\nfixture"
         image = api_request("PUT", path + "/image", cover, token=b, mime="image/png")
         assert objects["/uploads/" + image["image_key"]] == cover
@@ -936,15 +942,19 @@ def run_api_checks(optimize="Debug", backend_image=None):
             from metadata_integration import check_track_metadata
             check_track_metadata(api_request, execute_sql, env, executable, BACKEND, objects, block_artwork, optimize)
 
-        # Catalog fixtures are seeded only in the disposable database; no Apple request is needed.
+        # Catalog fixtures are seeded only in the disposable database; no provider request is needed.
         web_song = {
             'provider': 'itunes', 'external_id': '123456', 'title': 'Web fixture (Live)', 'artist': 'Web artist',
             'album': 'Web album', 'artwork_url': None, 'source_url': None,
         }
+        deezer_song = {**web_song, 'provider': 'deezer', 'external_id': '2645471652'}
         for key, value in [
             ('catalog:v2:search:itunes:US:25:Web fixture', [web_song]),
             ('catalog:v2:search:itunes:US:25:Empty fixture', []),
+            ('catalog:v2:search:deezer:25:Web fixture', [deezer_song]),
+            ('catalog:v2:search:deezer:25:Empty fixture', []),
             ('catalog:v2:lookup:itunes:US:123456', web_song),
+            ('catalog:v2:lookup:deezer:2645471652', deezer_song),
         ]:
             body = json.dumps(value)
             execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('{key}', '{body}', clock_timestamp() + interval '10 minutes')")
@@ -956,9 +966,14 @@ def run_api_checks(optimize="Debug", backend_image=None):
         api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123456'}, expected=401)
         api_request('POST', '/api/web/tracks', {'provider': 'itunes', 'external_id': '123&other=1'}, token=a, expected=400)
         api_request('POST', '/api/web/tracks', {'external_id': '123456'}, token=a, expected=400)
-        api_request('POST', '/api/web/tracks', {'provider': 'deezer', 'external_id': '123456'}, token=a, expected=400)
+        api_request('POST', '/api/web/tracks', {'provider': 'unknown', 'external_id': '123456'}, token=a, expected=400)
         selection = {'provider': 'itunes', 'external_id': '123456'}
         playback_id = api_request('POST', '/api/web/tracks', {**selection, 'add_to_library': False}, token=a, expected=202)['id']
+        deezer_id = api_request('POST', '/api/web/tracks', {
+            'provider': 'deezer', 'external_id': '2645471652', 'add_to_library': False,
+        }, token=a, expected=202)['id']
+        assert deezer_id == playback_id, 'the same recording from another provider reuses the track'
+        assert execute_sql(f"SELECT count(*) FROM musica.track_sources WHERE provider='deezer' AND external_id='2645471652' AND track_id='{playback_id}'") == '1'
         assert execute_sql(f"SELECT count(*) FROM musica.track_playlists WHERE track_id='{playback_id}'") == '0'
         api_request('GET', '/api/web/tracks/' + playback_id, expected=401)
         playback = api_request('GET', '/api/web/tracks/' + playback_id, token=a)
@@ -996,6 +1011,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
         ]
         catalog_body = json.dumps(catalog_candidates)
         execute_sql(f"INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('catalog:v2:search:itunes:US:25:ARTIST fixture', '{catalog_body}', clock_timestamp() + interval '10 minutes')")
+        execute_sql("INSERT INTO musica.catalog_cache (key, body, expires_at) VALUES ('catalog:v2:search:deezer:25:ARTIST fixture', '[]', clock_timestamp() + interval '10 minutes')")
         shared_result = api_request('GET', '/api/web/search?q=ARTIST%20fixture', token=a)
         assert shared_result['catalog'] == [remix], 'catalog is searched alongside local results; source/name duplicates are removed and Remix is preserved'
         results = shared_result['library']

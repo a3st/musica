@@ -374,6 +374,7 @@ export class Application {
     this.sessionLoading = false;
     this.sessionError = '';
     this.player.engine.stop();
+    this.player.lyricsOpen = false;
     this.uploads.reset();
     this.spotify.reset();
     this.search.reset();

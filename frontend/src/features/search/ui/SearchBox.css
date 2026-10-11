@@ -4,6 +4,39 @@
   width: 100%;
 }
 
+.search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-clear {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.search-clear:hover,
+.search-clear:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.search-clear svg {
+  width: 18px;
+  height: 18px;
+}
+
 .search-dropdown {
   position: absolute;
   top: calc(100% + 8px);

@@ -39,6 +39,12 @@
 #queue-list {
   overflow-y: auto;
   min-height: 0;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+#queue-list::-webkit-scrollbar {
+  display: none;
 }
 .queue-item {
   display: flex;

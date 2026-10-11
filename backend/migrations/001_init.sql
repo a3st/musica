@@ -109,7 +109,7 @@ CREATE INDEX tracks_owner_idx ON musica.tracks(owner_id);
 CREATE INDEX tracks_orphaned_idx ON musica.tracks(orphaned_at) WHERE catalog_key IS NOT NULL;
 
 CREATE TABLE musica.track_sources (
-    provider TEXT NOT NULL CHECK (provider IN ('spotify', 'itunes')),
+    provider TEXT NOT NULL CHECK (provider IN ('spotify', 'itunes', 'deezer')),
     external_id TEXT NOT NULL,
     track_id UUID NOT NULL REFERENCES musica.tracks(id) ON DELETE CASCADE,
     PRIMARY KEY (provider, external_id)

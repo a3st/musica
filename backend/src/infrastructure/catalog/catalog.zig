@@ -1,19 +1,25 @@
 const std = @import("std");
 const ITunesClient = @import("providers/itunes.zig").ITunesClient;
+const DeezerClient = @import("providers/deezer.zig").DeezerClient;
 const model = @import("model.zig");
 
-/// Единая точка доступа к внешним каталогам; пока подключён только iTunes.
+/// Единая точка доступа к каталогам iTunes и Deezer.
 pub const Catalog = struct {
     itunes: ITunesClient,
+    deezer: DeezerClient,
 
     /// Создаёт клиенты провайдеров; после первого запроса экземпляр нельзя копировать.
     pub fn init(io: std.Io, allocator: std.mem.Allocator) Catalog {
-        return .{ .itunes = ITunesClient.init(io, allocator, "US", 25) };
+        return .{
+            .itunes = ITunesClient.init(io, allocator, "US", 25),
+            .deezer = DeezerClient.init(io, allocator, 25),
+        };
     }
 
     /// Освобождает HTTP-клиенты после остановки сервера и фоновых задач.
     pub fn deinit(self: *Catalog) void {
         self.itunes.deinit();
+        self.deezer.deinit();
         self.* = undefined;
     }
 
@@ -23,10 +29,15 @@ pub const Catalog = struct {
         arena: std.mem.Allocator,
         query: []const u8,
     ) ![]const model.SearchSource {
-        const sources = try arena.alloc(model.SearchSource, 1);
+        const sources = try arena.alloc(model.SearchSource, 2);
         sources[0] = .{
             .provider = .itunes,
             .cache_key = try self.searchCacheKey(arena, .itunes, query),
+        };
+
+        sources[1] = .{
+            .provider = .deezer,
+            .cache_key = try self.searchCacheKey(arena, .deezer, query),
         };
 
         return sources;
@@ -41,6 +52,7 @@ pub const Catalog = struct {
     ) ![]const model.SearchTrack {
         const tracks = try switch (provider) {
             .itunes => self.itunes.search(arena, query),
+            .deezer => self.deezer.search(arena, query),
         };
 
         const results = try arena.alloc(model.SearchTrack, tracks.len);
@@ -64,6 +76,11 @@ pub const Catalog = struct {
                 "catalog:v2:search:{s}:{s}:{d}:{s}",
                 .{ @tagName(provider), self.itunes.country, self.itunes.limit, query },
             ),
+            .deezer => std.fmt.allocPrint(
+                arena,
+                "catalog:v2:search:{s}:{d}:{s}",
+                .{ @tagName(provider), self.deezer.limit, query },
+            ),
         };
     }
 
@@ -80,6 +97,11 @@ pub const Catalog = struct {
                 "catalog:v2:lookup:{s}:{s}:{s}",
                 .{ @tagName(provider), self.itunes.country, external_id },
             ),
+            .deezer => std.fmt.allocPrint(
+                arena,
+                "catalog:v2:lookup:{s}:{s}",
+                .{ @tagName(provider), external_id },
+            ),
         };
     }
 
@@ -92,6 +114,7 @@ pub const Catalog = struct {
     ) !model.SearchTrack {
         const track = try switch (provider) {
             .itunes => self.itunes.lookup(arena, external_id),
+            .deezer => self.deezer.lookup(arena, external_id),
         };
 
         return identifyTrack(provider, track);

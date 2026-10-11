@@ -31,6 +31,7 @@ export class SpotifyState {
     this.open = false;
   }
   async read(files: File[]): Promise<void> {
+    if (this.busy) return;
     const version = ++this.reading;
     this.input = null;
     this.preview = null;
@@ -74,7 +75,10 @@ export class SpotifyState {
       const result = await spotifyApi.importSpotify(this.input);
       if (generation !== this.generation) return;
       this.input = null;
-      this.notice = t('spotify.queued', { count: result.tracks });
+      this.notice = t('spotify.imported', {
+        playlists: result.playlists.length,
+        tracks: result.tracks,
+      });
       await this.changed(result.playlists[0]);
     } catch (error) {
       if (generation === this.generation) this.error = errorMessage(error);

@@ -14,8 +14,14 @@
   background: var(--subtle);
   cursor: grab;
 }
+
+.collection-scrollbar.contained {
+  position: absolute;
+}
 main:hover ~ .collection-scrollbar,
 .search-container:hover .collection-scrollbar,
+.queue-panel:hover .collection-scrollbar,
+.lyrics-panel:hover .collection-scrollbar,
 .collection-scrollbar:hover,
 .collection-scrollbar:focus-within,
 .collection-scrollbar.dragging {

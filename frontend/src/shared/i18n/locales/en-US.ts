@@ -6,12 +6,20 @@ export const english = {
   'search.library': 'Library',
   'search.service': 'Shared library',
   'search.itunes': 'iTunes',
+  'search.deezer': 'Deezer',
   'search.recent': 'Recent finds',
   'search.recentEmpty': 'Selected tracks will appear here. Start typing a song or artist.',
-  'search.moreCharacters': 'Enter at least two characters to search iTunes.',
+  'search.clear': 'Clear search',
+  'duration.minutes': '{minutes} min',
+  'spotify.dropHint': 'Drop Playlists.json and YourLibrary.json here, or choose files',
+  'spotify.likedSongs': 'Liked Songs → Uploads',
+  'spotify.contents': 'Tracks in “{title}”',
+  'spotify.imported':
+    '{playlists} playlists imported, {tracks} tracks added to the download queue.',
+  'search.moreCharacters': 'Enter at least two characters to search the catalog.',
   'web.heading': 'Discover new music',
   'web.description':
-    'Search the iTunes catalog. Added songs will appear in Uploads and be prepared for playback.',
+    'Search the music catalog. Added songs will appear in Uploads and be prepared for playback.',
   'web.hint': 'Enter a song title or artist in the search bar and press Enter.',
   'web.empty': 'No songs found. Try a different title or artist.',
   'web.searching': 'Searching for songs…',
@@ -29,7 +37,7 @@ export const english = {
   'duration.seconds': '{seconds} sec',
   'playlists.durationUnknown': 'duration unavailable',
   'playlists.durationPartial': 'at least {duration}',
-  'web.store': 'Open “{title}” in iTunes',
+  'web.store': 'Open “{title}” on the provider website',
   'web.unavailable': 'The catalog is temporarily unavailable. Try again later.',
   'tracks.removeSharedDescription':
     '“{title}” will be removed from Uploads and remain in other playlists.',
@@ -270,4 +278,6 @@ export const english = {
   'uploads.titleField': 'Title of {filename}',
   'uploads.tooLarge': 'File exceeds the server limit',
   'uploads.unknownArtist': 'Unknown artist',
+  'lyrics.title': 'Lyrics',
+  'lyrics.unavailable': 'Lyrics are not available yet',
 } as const satisfies Messages;

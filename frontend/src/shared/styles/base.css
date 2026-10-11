@@ -414,6 +414,16 @@ progress::-moz-progress-bar {
 .library-sheet[open] {
   display: flex;
   flex-direction: column;
+  animation: library-enter 0.25s ease-out;
+}
+
+@keyframes library-enter {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 .library-sheet .dialog-heading {
   margin-bottom: 36px;

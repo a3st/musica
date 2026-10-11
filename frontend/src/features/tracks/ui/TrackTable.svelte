@@ -37,7 +37,7 @@
       >{language.t('tracks.artistColumn')}</span
     ><span class="track-length">{language.t('tracks.durationColumn')}</span><span
       >{language.t('tracks.statusColumn')}</span
-    ><span>{language.t('tracks.actionsColumn')}</span>
+    ><span aria-hidden="true"></span>
   </div>
   {#each tracks as track, index (track.id)}
     <div

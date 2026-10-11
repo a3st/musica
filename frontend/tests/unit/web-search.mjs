@@ -8,11 +8,25 @@ for (const invalid of [null, {}, { web_search: 'false', spotify_import: true }, 
 }
 
 const { parseSearchTracks } = await import(moduleUrl(new URL('../../src/features/web-search/model.ts', import.meta.url)));
+const { metadata } = await import(moduleUrl(new URL('../../src/features/playlists/model.ts', import.meta.url)));
+const playlistMetadata = {
+  id: '00000000-0000-4000-8000-000000000001', owner_id: '00000000-0000-4000-8000-000000000002',
+  title: 'Mix', description: '', visibility: 'private', is_default: false, image_key: null,
+};
+const coverTrack = { id: playlistMetadata.id, artwork_key: 'tracks/first/artwork.jpg' };
+assert.deepEqual(metadata({ ...playlistMetadata, cover_tracks: [coverTrack] }).cover_tracks, [coverTrack]);
+assert.deepEqual(metadata(playlistMetadata).cover_tracks, []);
+for (const cover_tracks of [[{ ...coverTrack, id: 'invalid' }], Array(5).fill(coverTrack), 'invalid']) {
+  assert.throws(() => metadata({ ...playlistMetadata, cover_tracks }));
+}
 const song = {
   provider: 'itunes', external_id: '123', title: '<img src=x> (Live Remix)', artist: 'Artist', album: null,
   artwork_url: 'https://example.com/cover.jpg', source_url: 'https://music.apple.com/track',
 };
 assert.deepEqual(parseSearchTracks({ tracks: [song] })[0], song);
+const deezerSong = { ...song, provider: 'deezer', source_url: 'https://www.deezer.com/track/123' };
+assert.deepEqual(parseSearchTracks({ tracks: [song, deezerSong] }), [song, deezerSong]);
+assert.throws(() => parseSearchTracks({ tracks: [deezerSong, deezerSong] }));
 assert.equal('duration_seconds' in parseSearchTracks({ tracks: [{ ...song, duration_seconds: 123 }] })[0], false);
 for (const invalid of [
   { tracks: null },
@@ -20,7 +34,7 @@ for (const invalid of [
   { tracks: [{ ...song, external_id: '123&other=value' }] },
   { tracks: [{ ...song, artwork_url: 'javascript:alert(1)' }] },
   { tracks: [{ ...song, artwork_url: 'https://user:pass@example.com/image' }] },
-  { tracks: [{ ...song, provider: 'deezer' }] },
+  { tracks: [{ ...song, provider: 'unknown' }] },
   { tracks: [{ ...song, provider: undefined }] },
   { tracks: [{ ...song, source_url: 'javascript:alert(1)' }] },
 ]) assert.throws(() => parseSearchTracks(invalid));
@@ -43,6 +57,8 @@ assert.deepEqual(JSON.parse(calls[1].options.body), { provider: 'itunes', extern
 await webSearchApi.add(song, controller.signal, false);
 assert.equal(JSON.parse(calls[2].options.body).add_to_library, false);
 assert.equal(calls[1].options.method, 'POST');
+await webSearchApi.add(deezerSong, controller.signal, false);
+assert.deepEqual(JSON.parse(calls[3].options.body), { provider: 'deezer', external_id: '123', add_to_library: false });
 controller.abort();
 assert.equal(calls[0].options.signal.aborted, true);
 assert.equal(calls[1].options.signal.aborted, true);

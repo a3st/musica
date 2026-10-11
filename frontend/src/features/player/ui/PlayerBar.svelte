@@ -99,6 +99,17 @@
   </div>
   <div class="player-right">
     <button
+      id="lyrics-toggle"
+      class="icon-button"
+      aria-label={language.t('lyrics.title')}
+      title={language.t('lyrics.title')}
+      aria-controls="lyrics-panel"
+      aria-expanded={controller.lyricsOpen}
+      onclick={() => {
+        controller.lyricsOpen = !controller.lyricsOpen;
+      }}><Icon name="karaoke" /></button
+    >
+    <button
       id="queue-toggle"
       class="icon-button"
       aria-label={language.t('queue.title')}

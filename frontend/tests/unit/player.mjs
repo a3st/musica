@@ -15,6 +15,11 @@ class AudioFixture extends EventTarget {
   removeAttribute(name) { if (name === 'src') this.src = ''; }
 }
 globalThis.Audio = AudioFixture;
+const preferences = new Map();
+globalThis.localStorage = {
+  getItem: key => preferences.get(key) ?? null,
+  setItem: (key, value) => preferences.set(key, value),
+};
 if (!globalThis.navigator) globalThis.navigator = {};
 const { PlayerEngine } = await import(moduleUrl(new URL('../../src/features/player/engine.ts', import.meta.url)));
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -36,8 +41,26 @@ assert.equal(engine.current.id, second.id);
 engine.volume(35); engine.mute();
 assert.equal(engine.snapshot().muted, true);
 assert.equal(engine.snapshot().volume, 35);
+const restored = new PlayerEngine(() => {}, () => {}, () => id(1), () => null);
+assert.equal(restored.snapshot().volume, 35, 'volume survives a new player instance');
+assert.equal(restored.snapshot().muted, true, 'mute is restored without losing volume');
+restored.mute();
+assert.equal(restored.snapshot().muted, false);
+assert.equal(restored.snapshot().volume, 35);
+restored.volume(0);
+const silent = new PlayerEngine(() => {}, () => {}, () => id(1), () => null);
+assert.equal(silent.snapshot().volume, 0, 'stored zero is distinct from an absent preference');
+silent.dispose(); restored.dispose();
+for (const invalid of ['NaN', '101', '-1', '', 'garbage']) {
+  preferences.set('musica:volume', invalid);
+  const fallback = new PlayerEngine(() => {}, () => {}, () => id(1), () => null);
+  assert.equal(fallback.snapshot().volume, 100, 'invalid volume falls back to the audio default');
+  fallback.dispose();
+}
 engine.mute();
 assert.equal(engine.snapshot().volume, 35, 'unmuting restores volume');
+engine.volume(NaN);
+assert.equal(engine.snapshot().volume, 35, 'invalid input does not overwrite the volume');
 engine.seek(500);
 assert.equal(engine.audio.currentTime, 30);
 engine.previous();

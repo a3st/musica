@@ -154,7 +154,11 @@ fn uploadImpl(
     }
 
     app.storage.putInBucket(arena, location.bucket, location.key, mime, data) catch |err| {
-        std.log.err("Track storage upload failed: {s}", .{@errorName(err)});
+        std.log.err("Track storage upload failed: {s} (track={s}, upload_attempt={s})", .{
+            @errorName(err),
+            canonical_id,
+            lease.attempt_id orelse "unknown",
+        });
         if (err == error.Canceled) return err;
         if (err == error.StorageTimeout) return error.StorageTimeout;
 

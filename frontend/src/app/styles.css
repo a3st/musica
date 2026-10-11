@@ -13,5 +13,6 @@
 @import '../features/player/ui/PlayerBar.css';
 @import '../features/uploads/ui/UploadDialog.css';
 @import '../features/player/ui/QueuePanel.css';
+@import '../features/player/ui/LyricsPanel.css';
 @import '../features/playlists/ui/PlaylistEditor.css';
 @import '../shared/ui/CollectionScrollbar.css';

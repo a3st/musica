@@ -10,6 +10,7 @@ import {
 import { t } from '../../shared/i18n';
 import { track, type Track } from '../tracks/model';
 export interface PlaylistSummary {
+  cover_tracks?: Pick<Track, 'id' | 'artwork_key'>[];
   id: string;
   owner_id: string;
   title: string;
@@ -40,6 +41,8 @@ export interface Playlist {
 
 export function metadata(data: unknown) {
   const r = record(data);
+  const covers = r.cover_tracks ?? [];
+  if (!Array.isArray(covers) || covers.length > 4) throw new Error(t('errors.invalidResponse'));
   if (r.tags !== undefined && !Array.isArray(r.tags)) throw new Error(t('errors.invalidResponse'));
   return {
     id: uuid(r.id),
@@ -50,6 +53,10 @@ export function metadata(data: unknown) {
     visibility: choice(r.visibility, ['private', 'public', 'unlisted'] as const),
     is_default: bool(r.is_default),
     image_key: nullableText(r.image_key),
+    cover_tracks: covers.map((value: unknown) => {
+      const item = record(value);
+      return { id: uuid(item.id), artwork_key: nullableText(item.artwork_key) };
+    }),
     duration_seconds: nullableNonNegativeInteger(r.duration_seconds ?? null),
     duration_complete: r.duration_complete === undefined ? false : bool(r.duration_complete),
   };

@@ -50,8 +50,16 @@ test "Catalog selection requires a supported provider and an external ID" {
     try std.testing.expectEqual(Provider.itunes, valid.value.provider);
     try validateExternalId(valid.value.external_id);
 
+    const deezer = try std.json.parseFromSlice(Selection, std.testing.allocator,
+        \\{"provider":"deezer","external_id":"2645471652"}
+    , .{});
+    defer deezer.deinit();
+
+    try std.testing.expectEqual(Provider.deezer, deezer.value.provider);
+    try validateExternalId(deezer.value.external_id);
+
     try std.testing.expectError(error.InvalidEnumTag, std.json.parseFromSlice(Selection, std.testing.allocator,
-        \\{"provider":"deezer","external_id":"123"}
+        \\{"provider":"unknown","external_id":"123"}
     , .{}));
     try std.testing.expectError(error.MissingField, std.json.parseFromSlice(Selection, std.testing.allocator,
         \\{"external_id":"123"}

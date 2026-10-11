@@ -8,6 +8,7 @@
   import PlaylistPage from '../../pages/PlaylistPage.svelte';
   import PlayerBar from '../../features/player/ui/PlayerBar.svelte';
   import QueuePanel from '../../features/player/ui/QueuePanel.svelte';
+  import LyricsPanel from '../../features/player/ui/LyricsPanel.svelte';
   const app = getApplication();
   const signedOut = $derived(!app.auth.user && (app.authOpen || !app.library.selected));
   let main = $state<HTMLElement | undefined>();
@@ -22,41 +23,47 @@
 {#if signedOut}
   <AuthPlaceholder />
 {:else}
-  <Sidebar /><TopBar />
-  <div class="workspace">
-    <main
-      bind:this={main}
-      id="collection"
-      aria-live="polite"
-      aria-busy={app.sessionLoading && !app.library.selected}
-    >
-      {#if app.library.selected}
-        <PlaylistPage />
-      {:else if app.sessionError}
-        <div class="collection-state" role="alert">
-          <Icon name="music" />
-          <h1>{app.language.t('playlists.loadFailed')}</h1>
-          <p>{app.sessionError}</p>
-          <button class="button primary" id="retry-playlist" onclick={() => app.run(app.start())}>
-            {app.language.t('common.retry')}
-          </button>
-        </div>
-      {:else}
-        <div class="collection-state" role="status">
-          <span class="spinner"></span>
-          <p>{app.language.t('playlists.loading')}</p>
-        </div>
-      {/if}
-    </main>
-    <CollectionScrollbar target={main} label={app.language.t('playlists.scroll')} />
+  <TopBar />
+  <div class="library-panels" inert={app.player.lyricsOpen}>
+    <Sidebar />
+    <div class="workspace">
+      <main
+        bind:this={main}
+        id="collection"
+        aria-live="polite"
+        aria-busy={app.sessionLoading && !app.library.selected}
+      >
+        {#if app.library.selected}
+          <PlaylistPage />
+        {:else if app.sessionError}
+          <div class="collection-state" role="alert">
+            <Icon name="music" />
+            <h1>{app.language.t('playlists.loadFailed')}</h1>
+            <p>{app.sessionError}</p>
+            <button class="button primary" id="retry-playlist" onclick={() => app.run(app.start())}>
+              {app.language.t('common.retry')}
+            </button>
+          </div>
+        {:else}
+          <div class="collection-state" role="status">
+            <span class="spinner"></span>
+            <p>{app.language.t('playlists.loading')}</p>
+          </div>
+        {/if}
+      </main>
+      <CollectionScrollbar target={main} label={app.language.t('playlists.scroll')} />
+    </div>
   </div>
-  <PlayerBar state={app.player} language={app.language} /><QueuePanel
-    state={app.player}
-    language={app.language}
-  />
+  <QueuePanel state={app.player} language={app.language} />
+  <LyricsPanel state={app.player} language={app.language} />
+  <PlayerBar state={app.player} language={app.language} />
 {/if}
 
 <style>
+  .library-panels {
+    display: contents;
+  }
+
   .collection-state {
     min-height: 100%;
     display: flex;

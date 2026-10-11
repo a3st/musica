@@ -30,6 +30,7 @@
   user={app.auth.user}
   language={app.language}
   {canReadImage}
+  shareToken={app.library.shareToken}
   menu={(origin, point) => {
     const summary = app.library.items.find((item) => item.id === playlist.id) ?? {
       ...playlist,

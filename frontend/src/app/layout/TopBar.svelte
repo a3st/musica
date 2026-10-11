@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Avatar from '../../shared/ui/Avatar.svelte';
   import { getApplication } from '../context';
   import Icon from '../../shared/ui/Icon.svelte';
   import Brand from '../../shared/ui/Brand.svelte';
@@ -48,8 +49,9 @@
   />
   <div class="topbar-actions">
     <button
-      class="button upload-button desktop-only"
+      class="button upload-button"
       data-action="upload"
+      aria-label={app.language.t('uploads.title')}
       onclick={() => app.upload()}
       ><Icon name="cloud" /><span>{app.language.t('uploads.title')}</span><span
         id="upload-count"
@@ -66,11 +68,7 @@
         aria-controls="profile-menu"
         onclick={() => {
           profileOpen = !profileOpen;
-        }}
-        ><span class="user-avatar"
-          ><span class="avatar-label">{app.auth.user?.username[0].toLocaleUpperCase() ?? 'M'}</span
-          ></span
-        ></button
+        }}><Avatar name={app.auth.user?.username ?? 'Musica'} /></button
       >
       <div id="profile-menu" class="profile-menu" hidden={!profileOpen}>
         <button

@@ -1,5 +1,6 @@
 const std = @import("std");
 const catalog_model = @import("../model.zig");
+const retry = @import("../../../helpers/retry.zig");
 
 /// Общий HTTP-клиент каталога; после первого запроса не копируйте экземпляр.
 pub const ITunesClient = struct {
@@ -95,13 +96,32 @@ pub const ITunesClient = struct {
         return writer.buffered();
     }
 
-    /// Повторяет GET один раз, если соединение из пула закрылось до получения ответа.
-    fn fetchWithRetry(self: *ITunesClient, url: []const u8, writer: *std.Io.Writer) !void {
-        self.fetchOnce(url, writer) catch |err| {
-            if (err != error.HttpConnectionClosing) return err;
+    /// Контекст GET; ответ каждой попытки начинается с пустого буфера.
+    const FetchContext = struct {
+        itunes: *ITunesClient,
+        url: []const u8,
+        writer: *std.Io.Writer,
 
-            try self.fetchOnce(url, writer);
+        /// Сбрасывает частичный ответ, сохраняя выделенную память.
+        fn beforeAttempt(self: *FetchContext, _: u8) !void {
+            self.writer.end = 0;
+        }
+
+        /// Выполняет одну попытку GET с включённым keep-alive.
+        fn perform(self: *FetchContext) !void {
+            try self.itunes.fetchOnce(self.url, self.writer);
+        }
+    };
+
+    /// Выполняет до трёх GET-попыток при временных сетевых ошибках в пределах общего таймаута.
+    fn fetchWithRetry(self: *ITunesClient, url: []const u8, writer: *std.Io.Writer) !void {
+        var context: FetchContext = .{
+            .itunes = self,
+            .url = url,
+            .writer = writer,
         };
+
+        try retry.run(self.client.io, .{}, &context, FetchContext.beforeAttempt, FetchContext.perform, shouldRetry);
     }
 
     /// Выполняет GET по фиксированному адресу провайдера; адрес клиента не принимается извне.
@@ -119,6 +139,25 @@ pub const ITunesClient = struct {
         }
     }
 };
+
+/// Повторяет только сетевые сбои; отмена, HTTP-ошибки и переполнение буфера завершают вызов.
+fn shouldRetry(err: anyerror) bool {
+    return switch (err) {
+        error.HttpConnectionClosing,
+        error.HttpRequestTruncated,
+        error.HttpChunkTruncated,
+        error.ConnectionResetByPeer,
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.Timeout,
+        error.BrokenPipe,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        error.ReadFailed,
+        => true,
+        else => false,
+    };
+}
 
 /// Завершает ожидание внешнего каталога через двадцать секунд.
 fn deadline(io: std.Io) !void {

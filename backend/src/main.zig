@@ -135,6 +135,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("helpers/retry.zig");
     _ = @import("infrastructure/downloader/providers/yt_dlp.zig");
     _ = @import("infrastructure/downloader/downloader.zig");
     _ = @import("infrastructure/media/ffmpeg.zig");
@@ -144,6 +145,7 @@ test {
     _ = @import("features/tracks/metadata_worker.zig");
     _ = @import("features/web_int/routes.zig");
     _ = @import("infrastructure/catalog/providers/itunes.zig");
+    _ = @import("infrastructure/catalog/providers/deezer.zig");
     _ = @import("features/spotify_int/model.zig");
     _ = @import("features/spotify_int/routes.zig");
     _ = @import("features/imports/worker.zig");

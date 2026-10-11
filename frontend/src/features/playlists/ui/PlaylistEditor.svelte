@@ -145,7 +145,9 @@
     >
     <p class="form-error" role="alert">{controller.error}</p>
     <button id="playlist-save" class="button primary wide" disabled={controller.busy}
-      >{language.t(controller.id ? 'common.save' : 'playlists.create')}<Icon name="plus" /></button
+      >{language.t(controller.id ? 'common.save' : 'playlists.create')}<Icon
+        name={controller.id ? 'check' : 'plus'}
+      /></button
     >
   </form>
 </Dialog>

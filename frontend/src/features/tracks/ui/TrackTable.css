@@ -119,6 +119,22 @@
   justify-content: flex-end;
   gap: 6px;
 }
+
+.track-more {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.track-row:hover .track-more,
+.track-row:focus-within .track-more {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .track-more {
+    opacity: 1;
+  }
+}
 .empty-state {
   text-align: center;
   padding: 65px 20px;
