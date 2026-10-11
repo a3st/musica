@@ -1,0 +1,3 @@
+/* Общие переменные и базовые правила; стили компонентов находятся рядом с ними. */
+@import '../shared/styles/tokens.css';
+@import '../shared/styles/base.css';

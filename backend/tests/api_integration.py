@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from support import available_port, wait_for
+from profile_admin_checks import check_profile_and_admin
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -1041,6 +1042,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
         print('PASS: personal search checks public, owner and member access, unlisted privacy, pending exclusion and deduplication.')
         print('PASS: authenticated service search, personal/pending exclusion, word matching, metadata and literal wildcards.')
         print('PASS: Web search ACL/cache, verified catalog selection, shared ownership, deduplication and personal unlink.')
+        check_profile_and_admin(api_request, execute_sql)
         assert api_request("GET", "/api/unknown", expected=404) == {"error": "not_found"}
         if backend_image:
             diagnostics = subprocess.check_output(

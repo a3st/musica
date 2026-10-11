@@ -1,6 +1,19 @@
 const std = @import("std");
 const database = @import("../database.zig");
 
+/// Создаёт обычного пользователя с готовым хешем; триггер БД создаёт его Uploads.
+/// Возвращает ID в arena, транзакцию оставляет вызывающему сервису.
+pub fn create(
+    conn: *database.Connection,
+    arena: std.mem.Allocator,
+    username: []const u8,
+    password_hash: []const u8,
+) ![]const u8 {
+    const query = "INSERT INTO musica.users(username, password_hash) VALUES ($1, $2) RETURNING id::text";
+
+    return (try conn.queryText(arena, query, .{ username, password_hash })) orelse error.DatabaseUnavailable;
+}
+
 /// Создаёт сервисную учётку без пароля или возвращает ID существующей.
 pub fn ensureSystem(conn: *database.Connection, arena: std.mem.Allocator) ![]const u8 {
     const query =

@@ -4,7 +4,9 @@ const App = @import("../../app.zig").App;
 const model = @import("model.zig");
 const repository = @import("repository.zig");
 const database = @import("../../infrastructure/database.zig");
-const argon2 = std.crypto.pwhash.argon2;
+const passwords = @import("../../helpers/passwords.zig");
+const users_model = @import("../users/model.zig");
+const users_operations = @import("../users/operations.zig");
 
 /// Результат создания сессии; user_id хранится в arena, токен возвращается по значению.
 pub const Session = struct {
@@ -14,43 +16,28 @@ pub const Session = struct {
 
 /// Создаёт пользователя и сессию атомарно; пароль хешируется до получения соединения БД.
 pub fn register(app: *App, arena: std.mem.Allocator, raw: model.Credentials) !Session {
-    const input = try model.validateCredentials(raw);
-    var buffer: [256]u8 = undefined;
-
-    const password_hash = try argon2.strHash(
-        input.password,
-        .{ .allocator = arena, .params = .{ .t = 2, .m = 19456, .p = 1 }, .mode = .argon2id },
-        &buffer,
-        app.storage.io,
-    );
+    const input = try users_operations.prepareCreate(arena, app.io, .{
+        .username = raw.username,
+        .password = raw.password,
+    });
 
     const token = try model.generateToken(app.storage.io);
     const hash = model.tokenHash(&token);
 
-    return .{ .user_id = try registerRecord(&app.db, arena, input.username, password_hash, &hash), .token = token };
+    return .{ .user_id = try registerRecord(&app.db, arena, input, &hash), .token = token };
 }
 
 /// Проверяет пароль вне соединения БД и создаёт сессию; неизвестный пользователь также проходит вычисление Argon2id.
 pub fn login(app: *App, arena: std.mem.Allocator, raw: model.Credentials) !Session {
     const input = try model.validateCredentials(raw);
     const stored = try findCredentials(&app.db, arena, input.username);
-    // Run the same KDF for absent usernames to avoid a cheap enumeration path.
-    var buffer: [256]u8 = undefined;
+    // Неизвестное имя также проходит Argon2id, чтобы не раскрывать наличие учётки по времени ответа.
     const user = stored orelse {
-        _ = try argon2.strHash(
-            input.password,
-            .{ .allocator = arena, .params = .{ .t = 2, .m = 19456, .p = 1 }, .mode = .argon2id },
-            &buffer,
-            app.storage.io,
-        );
+        _ = try passwords.hash(arena, app.io, input.password);
 
         return error.Unauthorized;
     };
-    argon2.strVerify(user.password_hash, input.password, .{ .allocator = arena }, app.storage.io) catch |err| {
-        if (err == error.PasswordVerificationFailed) return error.Unauthorized;
-
-        return err;
-    };
+    try passwords.verify(arena, app.io, user.password_hash, input.password);
 
     const token = try model.generateToken(app.storage.io);
     const token_hash = model.tokenHash(&token);
@@ -121,30 +108,11 @@ test "session cookie parsing rejects malformed tokens and permits other cookies"
     try std.testing.expect(readCookieToken("xmusica_session=" ++ "a" ** 64) == null);
 }
 
-test "Argon2id hashes verify and reject a wrong password" {
-    var buffer: [256]u8 = undefined;
-
-    const hash = try argon2.strHash(
-        "test-password-123",
-        .{ .allocator = std.testing.allocator, .params = .{ .t = 2, .m = 19456, .p = 1 }, .mode = .argon2id },
-        &buffer,
-        std.testing.io,
-    );
-    try argon2.strVerify(hash, "test-password-123", .{ .allocator = std.testing.allocator }, std.testing.io);
-    try std.testing.expectError(error.PasswordVerificationFailed, argon2.strVerify(
-        hash,
-        "wrong-password",
-        .{ .allocator = std.testing.allocator },
-        std.testing.io,
-    ));
-}
-
 /// В одной транзакции создаёт пользователя и сессию; возвращает ID пользователя в arena.
 fn registerRecord(
     db: *database.Database,
     arena: std.mem.Allocator,
-    username: []const u8,
-    password_hash: []const u8,
+    input: users_model.PreparedUser,
     token_hash: []const u8,
 ) ![]const u8 {
     const conn = try db.acquire();
@@ -153,7 +121,7 @@ fn registerRecord(
     try conn.begin();
     errdefer conn.rollback() catch {};
 
-    const result = try repository.createUser(conn, arena, username, password_hash);
+    const result = try users_operations.create(conn, arena, input);
     try repository.createSession(conn, result, token_hash);
 
     try conn.commit();
@@ -199,14 +167,4 @@ pub fn logout(db: *database.Database, hash: []const u8) !void {
     defer conn.release();
 
     try repository.removeSession(conn, hash);
-}
-
-/// Возвращает JSON профиля пользователя в arena.
-pub fn readCurrentUser(db: *database.Database, arena: std.mem.Allocator, id: []const u8) ![]const u8 {
-    const conn = try db.acquire();
-    defer conn.release();
-
-    const result = try repository.readUser(conn, arena, id);
-
-    return result;
 }

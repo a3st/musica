@@ -6,7 +6,11 @@ Frontend — адаптивное PWA на Svelte 5 и TypeScript: плейли�
 с компьютера через перетаскивание файлов. На телефоне плейлисты открываются
 в боковой панели, плеер остаётся внизу. Backend поддерживает пользователей
 и сессии, плейлисты с ролями, PostgreSQL и MinIO, подготовку HLS через FFmpeg.
-Описание интерфейса и проверки — в [frontend/README.md](frontend/README.md).
+Описание интерфейса и проверки — в [frontend-app/README.md](frontend-app/README.md).
+Админка выделена в самостоятельный проект [frontend-admin](frontend-admin/README.md)
+на Svelte 5 и TypeScript: настройки аккаунта, смена пароля и удаление своего аккаунта.
+Администраторам доступны создание и удаление пользователей, статистика исходников
+и ручная очистка orphaned-треков.
 
 В окне загрузки доступен **Импорт из Spotify**: выберите `Playlists.json` и/или
 `YourLibrary.json` из выгрузки данных аккаунта. Backend создаёт треки и приватные
@@ -16,9 +20,12 @@ Frontend — адаптивное PWA на Svelte 5 и TypeScript: плейли�
 ## Структура
 
 ```text
-frontend/             Svelte 5 + TypeScript + Vite, PWA
+frontend-app/         Плеер: Svelte 5 + TypeScript + Vite, PWA
   src/                Клиентский код и стили
   public/             Иконки приложения
+frontend-admin/       Админка: Svelte 5 + TypeScript + Vite
+  src/                Оболочка, страницы, фичи и общие модули
+  public/             Статические ресурсы
 backend/              Zig 0.16.0 + http.zig
   src/main.zig        Инициализация и регистрация фич
   src/features/       auth, users, playlists, tracks, streaming, spotify_int, web_int, imports, capabilities, health
@@ -64,7 +71,7 @@ zig build run
 Во втором терминале запустите frontend:
 
 ```sh
-cd frontend
+cd frontend-app
 npm ci
 npm run dev
 ```
@@ -72,6 +79,18 @@ npm run dev
 Откройте <http://localhost:5173>. Vite проксирует `/api/` на
 `http://127.0.0.1:8080`, поэтому отдельная настройка CORS не требуется.
 Backend слушает только loopback-интерфейс.
+
+Админка запускается в отдельном терминале:
+
+```sh
+cd frontend-admin
+npm ci
+npm run dev
+```
+
+Откройте <http://localhost:5174>. Настройки языка и темы админки независимы
+от плеера. Текущая оболочка работает без backend; будущие API-запросы также
+будут проксироваться через `/api/`.
 
 Поиск сначала проверяет пользовательские треки в публичных, собственных и доступных
 по членству плейлистах через backend. При отсутствии совпадений поиск Web возвращает
@@ -109,10 +128,18 @@ curl http://127.0.0.1:8080/api/health
 
 ## Сборка
 
-Frontend (результат в `frontend/dist/`):
+Плеер (результат в `frontend-app/dist/`):
 
 ```sh
-cd frontend
+cd frontend-app
+npm run build
+npm run preview
+```
+
+Админка (результат в `frontend-admin/dist/`, preview на порту `4174`):
+
+```sh
+cd frontend-admin
 npm run build
 npm run preview
 ```
@@ -130,13 +157,14 @@ zig build -Doptimize=ReleaseSafe
 Откройте корень репозитория в VS Code. В `.vscode/tasks.json` настроены
 задачи, доступные через **Terminal → Run Task**:
 
-- `Frontend: install` — установка зависимостей через `npm ci` (перед первым запуском).
-- `Backend: build` / `Frontend: build` — сборка выбранного подпроекта.
+- `Frontend app: install` / `Frontend admin: install` — установка зависимостей
+  соответствующего интерфейса через `npm ci`.
+- `Backend: build`, `Frontend app: build`, `Frontend admin: build` — сборка выбранного подпроекта.
 - `Backend: build ReleaseSafe` — оптимизированная сборка backend.
 - `Backend: test` — все unit-тесты backend с итоговой сводкой.
-- `Backend: run` / `Frontend: run` — запуск выбранного подпроекта.
-- `Build: all` — параллельная сборка обоих подпроектов, также по **Ctrl+Shift+B**.
-- `Run: all` — одновременный запуск backend и frontend в отдельных терминалах.
+- `Backend: run`, `Frontend app: run`, `Frontend admin: run` — запуск выбранного подпроекта.
+- `Build: all` — параллельная сборка трёх подпроектов, также по **Ctrl+Shift+B**.
+- `Run: all` — одновременный запуск backend, плеера и админки в отдельных терминалах.
 
 Остановка серверов: **Terminal → Terminate Task** либо **Ctrl+C** в их терминалах.
 Zig и npm должны быть доступны в PATH; на Windows задачи используют `npm.cmd`.
@@ -156,7 +184,7 @@ Zig и npm должны быть доступны в PATH; на Windows зада
 применяется кнопкой «Доступна новая версия · Обновить». В режиме разработки service worker
 отключён.
 
-Для self-hosting разместите содержимое `frontend/dist/` на веб-сервере,
+Для self-hosting разместите содержимое `frontend-app/dist/` на веб-сервере,
 проксируйте `/api/` к backend и используйте один домен с HTTPS. Для клиентских
 маршрутов предусмотрите fallback на `index.html`, кроме `/api/`.
 Приложение рассчитано на размещение в корне домена. Установка PWA и service
@@ -167,6 +195,9 @@ worker требуют HTTPS либо localhost.
 `npm run preview` служит для локальной проверки сборки, а не для production;
 он не проксирует API. Для совместной проверки production-сборки и backend
 используйте reverse proxy.
+
+Админка имеет отдельную сборку `frontend-admin/dist/`; размещайте её на отдельном
+origin с собственным `/api/` reverse proxy. Её оболочка пока не использует PWA.
 
 Храните музыку и изменяемые данные отдельно от исходников, например в `media/`
 и `data/` в корне репозитория: эти каталоги исключены из Git. Загруженные

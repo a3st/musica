@@ -24,7 +24,8 @@ const spotify_int_routes = @import("features/spotify_int/routes.zig");
 const imports_worker = @import("features/imports/worker.zig");
 const web_int_routes = @import("features/web_int/routes.zig");
 const users_service = @import("features/users/service.zig");
-const users_routes = @import("features/users/routes.zig");
+const profile_routes = @import("features/profile/routes.zig");
+const admin_routes = @import("features/admin/routes.zig");
 const web_int_cleanup_worker = @import("features/web_int/cleanup_worker.zig");
 
 /// Создаёт ресурсы приложения, регистрирует маршруты и запускает сервер и фоновые задачи.
@@ -100,7 +101,8 @@ pub fn main(init: std.process.Init) !void {
     tracks_routes.register(router);
     playlists_routes.register(router);
     auth_routes.register(router);
-    users_routes.register(router);
+    profile_routes.register(router);
+    admin_routes.register(router);
     streaming_routes.register(router);
     if (config.spotify_int_enabled) spotify_int_routes.register(router);
     if (config.web_int_enabled) web_int_routes.register(router);
@@ -135,6 +137,11 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test {
+    _ = @import("helpers/passwords.zig");
+    _ = @import("features/users/model.zig");
+    _ = @import("features/profile/routes.zig");
+    _ = @import("features/admin/routes.zig");
+    _ = @import("features/profile/model.zig");
     _ = @import("helpers/retry.zig");
     _ = @import("infrastructure/downloader/providers/yt_dlp.zig");
     _ = @import("infrastructure/downloader/downloader.zig");

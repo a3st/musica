@@ -5,12 +5,11 @@ const api = @import("../../helpers/api.zig");
 const model = @import("model.zig");
 const service = @import("service.zig");
 
-/// Регистрирует маршруты регистрации, входа, выхода и профиля пользователя.
+/// Регистрирует маршруты регистрации, входа и выхода из сессии.
 pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
     router.post("/api/auth/register", signup, .{});
     router.post("/api/auth/login", login, .{});
     router.post("/api/auth/logout", logout, .{});
-    router.get("/api/users/me", readCurrentUser, .{});
 }
 
 /// Создаёт пользователя и сессию, если публичная регистрация разрешена; возвращает 201.
@@ -67,7 +66,7 @@ fn logout(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 }
 
 /// Устанавливает HttpOnly cookie сессии; remove сбрасывает её через Max-Age=0.
-fn setSessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: bool) !void {
+pub fn setSessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: bool) !void {
     const cookie = try std.fmt.allocPrint(
         res.arena,
         "musica_session={s}; Path=/api; HttpOnly; SameSite=Strict; Max-Age={d}{s}",
@@ -79,11 +78,4 @@ fn setSessionCookie(app: *App, res: *httpz.Response, token: []const u8, remove: 
     );
 
     res.header("Set-Cookie", cookie);
-}
-
-/// Возвращает профиль пользователя текущей сессии.
-fn readCurrentUser(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const user = service.requireUser(app, req, res.arena) catch |err| return api.failure(res, err);
-
-    api.sendJsonText(res, service.readCurrentUser(&app.db, res.arena, user) catch |err| return api.failure(res, err));
 }

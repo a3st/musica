@@ -6,95 +6,212 @@
       "type": "process",
       "command": "zig",
       "args": ["build", "test", "--summary", "all"],
-      "options": { "cwd": "${workspaceFolder}/backend" },
-      "group": { "kind": "test", "isDefault": true },
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "clear": true }
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
     },
     {
       "label": "Backend: build Debug",
       "type": "process",
       "command": "zig",
       "args": ["build", "-Doptimize=Debug", "--prefix", "zig-out/debug"],
-      "options": { "cwd": "${workspaceFolder}/backend" },
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
       "group": "build",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "clear": true }
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
     },
     {
       "label": "Backend: build",
       "type": "shell",
       "command": "zig",
       "args": ["build"],
-      "options": { "cwd": "${workspaceFolder}/backend" },
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
       "group": "build",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "clear": true }
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
     },
     {
       "label": "Backend: build ReleaseSafe",
       "type": "shell",
       "command": "zig",
       "args": ["build", "-Doptimize=ReleaseSafe"],
-      "options": { "cwd": "${workspaceFolder}/backend" },
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
       "group": "build",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "clear": true }
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
     },
     {
       "label": "Backend: run",
       "type": "shell",
       "command": "zig",
       "args": ["build", "run"],
-      "options": { "cwd": "${workspaceFolder}/backend" },
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
       "isBackground": true,
       "problemMatcher": [],
-      "runOptions": { "instanceLimit": 1 },
-      "presentation": { "panel": "dedicated", "group": "musica-dev", "reveal": "always" }
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "musica-dev",
+        "reveal": "always"
+      }
     },
     {
-      "label": "Frontend: install",
+      "label": "Frontend app: install",
       "type": "shell",
       "command": "npm",
-      "windows": { "command": "npm.cmd" },
+      "windows": {
+        "command": "npm.cmd"
+      },
       "args": ["ci"],
-      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-app"
+      },
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated" }
+      "presentation": {
+        "panel": "dedicated"
+      }
     },
     {
-      "label": "Frontend: build",
+      "label": "Frontend app: build",
       "type": "shell",
       "command": "npm",
-      "windows": { "command": "npm.cmd" },
+      "windows": {
+        "command": "npm.cmd"
+      },
       "args": ["run", "build"],
-      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-app"
+      },
       "group": "build",
       "problemMatcher": "$tsc",
-      "presentation": { "panel": "dedicated", "clear": true }
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
     },
     {
-      "label": "Frontend: run",
+      "label": "Frontend app: run",
       "type": "shell",
       "command": "npm",
-      "windows": { "command": "npm.cmd" },
+      "windows": {
+        "command": "npm.cmd"
+      },
       "args": ["run", "dev"],
-      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-app"
+      },
       "isBackground": true,
       "problemMatcher": [],
-      "runOptions": { "instanceLimit": 1 },
-      "presentation": { "panel": "dedicated", "group": "musica-dev", "reveal": "always" }
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "musica-dev",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Frontend admin: install",
+      "type": "shell",
+      "command": "npm",
+      "windows": {
+        "command": "npm.cmd"
+      },
+      "args": ["ci"],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-admin"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Frontend admin: build",
+      "type": "shell",
+      "command": "npm",
+      "windows": {
+        "command": "npm.cmd"
+      },
+      "args": ["run", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-admin"
+      },
+      "group": "build",
+      "problemMatcher": "$tsc",
+      "presentation": {
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Frontend admin: run",
+      "type": "shell",
+      "command": "npm",
+      "windows": {
+        "command": "npm.cmd"
+      },
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}/frontend-admin"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": {
+        "instanceLimit": 1
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "group": "musica-dev",
+        "reveal": "always"
+      }
     },
     {
       "label": "Build: all",
-      "dependsOn": ["Backend: build", "Frontend: build"],
+      "dependsOn": [
+        "Backend: build",
+        "Frontend app: build",
+        "Frontend admin: build"
+      ],
       "dependsOrder": "parallel",
-      "group": { "kind": "build", "isDefault": true },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
       "problemMatcher": []
     },
     {
       "label": "Run: all",
-      "dependsOn": ["Backend: run", "Frontend: run"],
+      "dependsOn": ["Backend: run", "Frontend app: run", "Frontend admin: run"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }

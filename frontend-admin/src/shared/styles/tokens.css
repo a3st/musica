@@ -1,0 +1,14 @@
+:root {
+  color-scheme: light;
+  --page: #f1f5f9;
+  --surface: #ffffff;
+  --input: #f6f8fb;
+  --text: #111827;
+  --muted: #697386;
+  --subtle: #97a0af;
+  --border: #e5eaf1;
+  --accent: #377ff8;
+  --hover: #f0f4fa;
+  --active: #eaf1ff;
+  --danger: #bd3047;
+}

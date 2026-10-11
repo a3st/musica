@@ -1,0 +1,283 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  background: var(--page);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+svg {
+  width: 21px;
+  height: 21px;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 18px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.primary {
+  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: #246ce1;
+}
+
+.danger {
+  color: white;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.danger:hover:not(:disabled) {
+  background: #a8283c;
+}
+
+.danger-outline {
+  color: var(--danger);
+  border-color: #eac4cd;
+}
+
+.wide {
+  width: 100%;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-button:hover {
+  background: var(--hover);
+}
+
+.muted,
+.notice {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.notice {
+  color: #167448;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+dialog {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 30px 100px #0003;
+  padding: 28px;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
+dialog::backdrop {
+  background: #27314460;
+  backdrop-filter: blur(5px);
+}
+
+.dialog-heading,
+.dialog-buttons {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.dialog-heading h2 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.dialog-buttons {
+  margin-top: 25px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+form label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 19px 0;
+}
+
+form input {
+  display: block;
+  width: 100%;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 9px;
+  padding: 12px 13px;
+  font-size: 13px;
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+.settings-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.settings-page h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: -1px;
+}
+
+.settings-section {
+  margin-top: 36px;
+}
+
+.settings-section h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 265px);
+  align-items: center;
+  gap: 28px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.settings-row small {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.red-zone {
+  padding-top: 28px;
+  border-top: 1px solid #edd8de;
+}
+
+.red-zone h2 {
+  color: var(--danger);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #bac4d3 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: #bac4d3;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+@media (max-width: 760px) {
+  .settings-page h1 {
+    font-size: 28px;
+  }
+
+  .settings-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition: none !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}

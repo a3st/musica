@@ -1,6 +1,7 @@
 const std = @import("std");
+const users_model = @import("../users/model.zig");
 
-/// Учётные данные для регистрации, входа и административного создания пользователя.
+/// Учётные данные регистрации или входа; административное создание использует users_model.CreateUser.
 pub const Credentials = struct {
     username: []const u8,
     password: []const u8,
@@ -14,15 +15,7 @@ pub const StoredCredentials = struct {
 
 /// Проверяет имя пользователя и пароль без изменения данных; иначе InvalidCredentials.
 pub fn validateCredentials(input: Credentials) !Credentials {
-    if (input.username.len < 3 or input.username.len > 64 or
-        input.password.len < 12 or input.password.len > 1024)
-        return error.InvalidCredentials;
-
-    for (input.username) |c| {
-        if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_')) return error.InvalidCredentials;
-    }
-
-    if (!std.unicode.utf8ValidateSlice(input.password)) return error.InvalidCredentials;
+    _ = try users_model.validateCreate(.{ .username = input.username, .password = input.password });
 
     return input;
 }

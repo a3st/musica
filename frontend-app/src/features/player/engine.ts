@@ -1,0 +1,449 @@
+import { AudioEffects } from './audio-effects';
+import type { AudioSettings } from '../settings/model';
+import { t } from '../../shared/i18n';
+import { errorMessage } from '../../shared/api/errors';
+import { readPreference, writePreference } from '../../shared/utils/storage';
+import type Hls from 'hls.js';
+import { tracksApi as api } from '../tracks/api';
+import type { Track } from '../tracks/model';
+
+export class PlayerEngine {
+  readonly audio = new Audio();
+  private readonly effects = new AudioEffects(this.audio);
+
+  current: Track | null = null;
+  loading = false;
+  shuffle = false;
+  repeat: 'none' | 'all' | 'one' = 'none';
+
+  private queue: Track[] = [];
+  private hls: Hls | null = null;
+  /** Смена трека или stop запрещает продолжение прежней асинхронной загрузки. */
+  private generation = 0;
+  private playbackRequested = false;
+  private playAttempt: Promise<void> | null = null;
+  private deferredController?: AbortController;
+  private readonly listeners = new AbortController();
+
+  /** Передаёт настройки эквалайзера и нормализации в аудиограф. */
+  setAudioSettings(settings: AudioSettings): void {
+    this.effects.update(settings);
+  }
+
+  /** Восстанавливает громкость и подключает слушатели аудио и системные кнопки плеера. */
+  constructor(
+    private readonly emit: () => void,
+    private readonly notify: (message: string) => void,
+    private readonly userId: () => string | null,
+    private readonly shareToken: (id: string) => string | null,
+  ) {
+    this.audio.preload = 'metadata';
+    const storedVolume = readPreference('musica:volume');
+
+    const volume = storedVolume === null ? NaN : Number(storedVolume);
+    if (storedVolume?.trim() && Number.isFinite(volume) && volume >= 0 && volume <= 100)
+      this.audio.volume = volume / 100;
+    this.audio.muted = readPreference('musica:muted') === 'true';
+
+    this.audio.addEventListener('volumechange', () => this.saveVolume(), {
+      signal: this.listeners.signal,
+    });
+    for (const event of [
+      'play',
+      'pause',
+      'loadedmetadata',
+      'timeupdate',
+      'durationchange',
+      'emptied',
+      'volumechange',
+    ])
+      this.audio.addEventListener(event, () => this.emit(), { signal: this.listeners.signal });
+
+    this.audio.addEventListener(
+      'canplay',
+      () => {
+        if (this.playbackRequested && this.audio.paused) this.startPlayback();
+      },
+      { signal: this.listeners.signal },
+    );
+    this.audio.addEventListener(
+      'ended',
+      () => {
+        if (this.repeat === 'one') {
+          this.audio.currentTime = 0;
+          this.resume();
+        } else this.advance(1, true);
+      },
+      { signal: this.listeners.signal },
+    );
+    this.audio.addEventListener(
+      'error',
+      () => {
+        if (this.current && !this.loading) this.notify(t('player.playFailed'));
+      },
+      { signal: this.listeners.signal },
+    );
+    if ('mediaSession' in navigator)
+      for (const [action, handler] of Object.entries({
+        play: () => this.resume(),
+        pause: () => this.pause(),
+        previoustrack: () => this.previous(),
+        nexttrack: () => this.next(),
+      })) {
+        try {
+          navigator.mediaSession.setActionHandler(action as MediaSessionAction, handler);
+        } catch {
+          /* Unsupported system control. */
+        }
+      }
+  }
+
+  /** Возвращает снимок состояния для реактивного интерфейса; копирует будущую очередь. */
+  snapshot() {
+    return {
+      current: this.current,
+      loading: this.loading,
+      upcoming: [...this.upcoming],
+      paused: this.audio.paused,
+      elapsed: this.audio.currentTime,
+      duration: Number.isFinite(this.audio.duration) ? this.audio.duration : 0,
+      volume: Math.round(this.audio.volume * 100),
+      muted: this.audio.muted || this.audio.volume === 0,
+      shuffle: this.shuffle,
+      repeat: this.repeat,
+    };
+  }
+
+  /** Обновляет данные текущего трека и очереди, сохраняя воспроизведение и порядок. */
+  updateMetadata(tracks: Track[]): void {
+    const updated = new Map(tracks.map((track) => [track.id, track]));
+    if (this.current) this.current = updated.get(this.current.id) ?? this.current;
+    this.queue = this.queue.map((track) => updated.get(track.id) ?? track);
+    this.emit();
+  }
+
+  /** Перематывает на долю длительности: значение слайдера находится в диапазоне 0–1000. */
+  seek(value: number): void {
+    if (Number.isFinite(this.audio.duration))
+      this.audio.currentTime = (value / 1000) * this.audio.duration;
+    this.emit();
+  }
+
+  /** Задаёт громкость 0–100 и снимает mute при положительном уровне. */
+  volume(value: number): void {
+    if (!Number.isFinite(value)) return;
+
+    this.audio.volume = Math.max(0, Math.min(1, value / 100));
+    if (this.audio.volume > 0) this.audio.muted = false;
+    this.saveVolume();
+    this.emit();
+  }
+
+  /** Переключает звук, сохраняя уровень; при нулевой громкости восстанавливает 50%. */
+  mute(): void {
+    this.audio.muted = !(this.audio.muted || this.audio.volume === 0);
+    if (!this.audio.muted && this.audio.volume === 0) this.audio.volume = 0.5;
+    this.saveVolume();
+    this.emit();
+  }
+
+  /** Сохраняет громкость отдельно от mute, чтобы выключение звука не теряло уровень. */
+  private saveVolume(): void {
+    this.effects.volumeChanged();
+    writePreference('musica:volume', String(Math.round(this.audio.volume * 100)));
+    writePreference('musica:muted', String(this.audio.muted));
+  }
+
+  /** Переключает случайный порядок воспроизведения. */
+  toggleShuffle(): void {
+    this.shuffle = !this.shuffle;
+    this.emit();
+  }
+
+  /** Переключает повтор: выключен, вся очередь, текущий трек. */
+  cycleRepeat(): void {
+    this.repeat = this.repeat === 'none' ? 'all' : this.repeat === 'all' ? 'one' : 'none';
+    this.emit();
+  }
+
+  /** Возвращает к началу после трёх секунд либо запускает предыдущий трек. */
+  previous(): void {
+    if (this.audio.currentTime > 3) this.audio.currentTime = 0;
+    else this.advance(-1);
+    this.emit();
+  }
+
+  /** Запускает следующий трек с учётом случайного порядка. */
+  next(): void {
+    this.advance(1);
+  }
+
+  /** Освобождает аудиограф, HLS, слушатели и обработчики Media Session. */
+  dispose(): void {
+    this.effects.dispose();
+    this.listeners.abort();
+    this.stop();
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = null;
+      for (const action of ['play', 'pause', 'previoustrack', 'nexttrack'] as const) {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch {}
+      }
+    }
+  }
+
+  /** Ожидает загрузку каталожного трека, отменяя ожидание при выборе другого. */
+  async loadDeferred(resolveTrack: (signal: AbortSignal) => Promise<Track>): Promise<void> {
+    this.effects.activate();
+    this.stop();
+    const generation = this.generation;
+    const controller = new AbortController();
+    this.deferredController = controller;
+    this.loading = true;
+    this.emit();
+
+    try {
+      const track = await resolveTrack(controller.signal);
+      if (generation !== this.generation || controller.signal.aborted) return;
+
+      await this.load(track, [track], true);
+    } catch (error) {
+      if (generation === this.generation && !controller.signal.aborted) {
+        this.loading = false;
+        this.notify(errorMessage(error));
+        this.emit();
+      }
+    }
+  }
+
+  /** Готовит HLS и запускает трек; смена поколения запрещает запуск устаревшей загрузки. */
+  async load(track: Track, queue: Track[], waitForAutomaticPreparation = false): Promise<void> {
+    this.effects.activate();
+    this.stop();
+    const generation = this.generation;
+    const token = this.shareToken(track.id);
+    this.effects.resetTrack();
+    this.current = track;
+    this.queue = queue.filter((item) => item.status !== 'pending');
+    this.loading = true;
+    this.playbackRequested = true;
+    this.emit();
+
+    try {
+      if (track.status === 'pending') throw new Error(t('player.uploadRequired'));
+
+      if (track.status !== 'streamed') {
+        if (track.owner_id === this.userId()) await api.prepare(track.id);
+        for (let attempt = 0; ; attempt++) {
+          if (generation !== this.generation) return;
+
+          const state = await api.preparation(track.id, token);
+          if (state.status === 'streamed') break;
+          if (
+            state.preparation === null &&
+            track.owner_id !== this.userId() &&
+            !waitForAutomaticPreparation
+          )
+            throw new Error(t('player.ownerPreparationRequired'));
+
+          if (state.preparation === 'failed') throw new Error(t('player.preparationFailed'));
+
+          if (attempt >= 900) throw new Error(t('player.preparationTimeout'));
+
+          await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      if (generation !== this.generation) return;
+
+      const url = `/api/tracks/${track.id}/hls/index.m3u8${token ? '?share_token=' + encodeURIComponent(token) : ''}`;
+      this.current = { ...track, status: 'streamed' };
+      if (this.audio.canPlayType('application/vnd.apple.mpegurl')) {
+        this.audio.src = url;
+        this.loading = false;
+        this.resume();
+      } else {
+        const { default: Hls } = await import('hls.js');
+        if (generation !== this.generation) return;
+
+        if (!Hls.isSupported()) throw new Error(t('player.unsupported'));
+
+        const hls = new Hls({
+          xhrSetup: (xhr) => {
+            xhr.withCredentials = true;
+          },
+          enableWorker: true,
+        });
+        this.hls = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (generation === this.generation) {
+            this.loading = false;
+            this.emit();
+            this.startPlayback();
+          }
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal && generation === this.generation) {
+            this.playbackRequested = false;
+            this.loading = false;
+            hls.destroy();
+            this.hls = null;
+            this.audio.removeAttribute('src');
+            this.emit();
+            this.notify(t('player.interrupted'));
+          }
+        });
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          if (generation !== this.generation) return;
+
+          hls.loadSource(url);
+          // После подключения источника play() может ожидать поступления сегментов.
+          this.startPlayback();
+        });
+        hls.attachMedia(this.audio);
+      }
+      if ('mediaSession' in navigator)
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: track.title,
+          artist: track.artist,
+        });
+      this.emit();
+    } catch (error) {
+      if (generation === this.generation) {
+        this.playbackRequested = false;
+        this.loading = false;
+        this.notify(errorMessage(error));
+        this.emit();
+      }
+    }
+  }
+
+  /** Переключает паузу текущего трека после завершения его подготовки. */
+  toggle(): void {
+    this.effects.activate();
+    if (!this.current || this.loading) return;
+
+    if (this.audio.paused) this.resume();
+    else this.pause();
+  }
+
+  /** Возвращает очередь после текущего трека, не меняя её порядок. */
+  get upcoming(): readonly Track[] {
+    const index = this.queue.findIndex((track) => track.id === this.current?.id);
+    return this.queue.slice(index + 1);
+  }
+
+  /** Добавляет доступный трек следующим или в конец, исключая повтор в очереди. */
+  enqueue(track: Track, next = false): void {
+    if (track.status === 'pending') return;
+
+    if (!this.current) {
+      void this.load(track, [track]);
+      return;
+    }
+    if (track.id === this.current.id) return;
+
+    this.queue = this.queue.filter((item) => item.id !== track.id);
+    if (next)
+      this.queue.splice(this.queue.findIndex((item) => item.id === this.current!.id) + 1, 0, track);
+    else this.queue.push(track);
+    this.emit();
+  }
+
+  /** Запускает трек из текущей очереди по ID. */
+  playQueued(id: string): void {
+    const track = this.queue.find((item) => item.id === id);
+    if (track) void this.load(track, this.queue);
+  }
+
+  /** Убирает будущий трек из очереди, сохраняя текущий. */
+  removeQueued(id: string): void {
+    if (id !== this.current?.id) this.queue = this.queue.filter((item) => item.id !== id);
+    this.emit();
+  }
+
+  /** Запрашивает продолжение воспроизведения, возвращая завершённый трек к началу. */
+  private resume(): void {
+    if (!this.current || this.loading) return;
+
+    this.playbackRequested = true;
+    if (this.audio.ended) this.audio.currentTime = 0;
+    this.startPlayback();
+  }
+
+  /** Отменяет намерение воспроизведения и ставит аудио на паузу. */
+  private pause(): void {
+    this.playbackRequested = false;
+    this.playAttempt = null;
+    this.audio.pause();
+  }
+
+  /** Запускает одну попытку play(); прерывание сменой источника допускает повтор на canplay. */
+  private startPlayback(): void {
+    this.effects.activate();
+    if (!this.current || !this.playbackRequested || this.playAttempt) return;
+
+    const generation = this.generation;
+    const attempt = this.audio.play();
+    this.playAttempt = attempt;
+    void attempt
+      .catch((error: unknown) => {
+        if (generation !== this.generation || this.playAttempt !== attempt) return;
+        // Смена источника может прервать play() до первого сегмента.
+        // Повтор запускается на canplay без дополнительного клика.
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+
+        this.playbackRequested = false;
+        this.notify(
+          error instanceof DOMException && error.name === 'NotAllowedError'
+            ? t('player.clickToPlay')
+            : t('player.playFailed'),
+        );
+      })
+      .finally(() => {
+        if (this.playAttempt === attempt) this.playAttempt = null;
+      });
+  }
+
+  /** Выбирает соседний или случайный трек; учитывает завершение очереди без повтора. */
+  private advance(direction: number, ended = false): void {
+    if (!this.current || !this.queue.length) return;
+
+    let index = this.queue.findIndex((item) => item.id === this.current!.id) + direction;
+    if (this.shuffle && this.queue.length > 1 && direction > 0) {
+      const candidates = this.queue.filter((item) => item.id !== this.current!.id);
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      index = this.queue.findIndex((item) => item.id === picked.id);
+    }
+    if (ended && index >= this.queue.length && this.repeat === 'none') {
+      this.emit();
+      return;
+    }
+    void this.load(this.queue[(index + this.queue.length) % this.queue.length], this.queue);
+  }
+
+  /** Инвалидирует загрузку, отменяет ожидание и освобождает HLS и источник аудио. */
+  stop(): void {
+    this.generation++;
+    this.deferredController?.abort();
+    this.deferredController = undefined;
+    this.playbackRequested = false;
+    this.playAttempt = null;
+    this.audio.pause();
+    this.hls?.destroy();
+    this.hls = null;
+    this.audio.removeAttribute('src');
+    this.audio.load();
+    this.current = null;
+    this.queue = [];
+    this.loading = false;
+    this.emit();
+  }
+
+  /** Убирает трек из очереди и останавливает его, если он текущий. */
+  remove(id: string): void {
+    this.queue = this.queue.filter((track) => track.id !== id);
+    if (this.current?.id === id) this.stop();
+    else this.emit();
+  }
+}
