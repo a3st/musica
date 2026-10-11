@@ -4,6 +4,7 @@
   import Icon from '../../shared/ui/Icon.svelte';
   import Brand from '../../shared/ui/Brand.svelte';
   import SearchBox from '../../features/search/ui/SearchBox.svelte';
+  import { profileUrl } from '../../shared/navigation/profile';
 
   const app = getApplication();
   let profileOpen = $state(false);
@@ -84,11 +85,13 @@
       <div id="profile-menu" class="profile-menu" hidden={!profileOpen}>
         <a
           class="profile-menu-item"
-          href="#account"
+          href={profileUrl()}
           onclick={(event) => {
-            event.preventDefault();
             profileOpen = false;
-            app.notify(app.language.t('profile.accountUnavailable'));
+            if (app.uploads.busy) {
+              event.preventDefault();
+              app.notify(app.language.t('app.finishUploads'));
+            }
           }}><Icon name="account" />{app.language.t('profile.account')}<Icon name="external" /></a
         >
         <button

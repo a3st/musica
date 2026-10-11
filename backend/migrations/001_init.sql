@@ -85,6 +85,8 @@ CREATE TABLE musica.tracks (
     object_key TEXT NOT NULL,
     content_type TEXT,
     size_bytes BIGINT CHECK (size_bytes > 0),
+    duration_seconds INTEGER CHECK (duration_seconds >= 0),
+    artwork_key TEXT CHECK (artwork_key <> ''),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     uploaded_at TIMESTAMPTZ,
     hls_bucket TEXT,

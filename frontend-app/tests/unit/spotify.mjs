@@ -29,3 +29,13 @@ assert.equal(filtered.playlists[0].tracks.length, 0);
 assert.equal(filtered.library.length, 1, 'excluding a playlist membership does not exclude library membership');
 assert.equal(result.input.playlists[0].tracks.length, 1, 'selection preserves the parsed draft');
 assert.equal(selectSpotifyTracks(result.input, new Set(['library:0'])).library.length, 0);
+
+const withoutPlaylist = selectSpotifyTracks(result.input, new Set(['playlist:0']));
+assert.equal(withoutPlaylist.playlists.length, 0, 'excluding a group does not create an empty playlist');
+assert.equal(withoutPlaylist.library.length, 1, 'group exclusion preserves membership elsewhere');
+assert.equal(selectSpotifyTracks(result.input, new Set(['library'])).library.length, 0);
+const twoPlaylists = { ...result.input, playlists: [result.input.playlists[0], { ...result.input.playlists[0], title: 'Second' }] };
+const selection = selectSpotifyTracks(twoPlaylists, new Set(['playlist:0', 'playlist:1:0']));
+assert.equal(selection.playlists.length, 1);
+assert.equal(selection.playlists[0].title, 'Second');
+assert.equal(selection.playlists[0].tracks.length, 0, 'track keys retain original group indices');

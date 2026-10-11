@@ -15,12 +15,12 @@ fn read(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
 
 test "capabilities are available without a session or database access" {
     var app: App = undefined;
-    app.capabilities = .{ .web_search = false, .spotify_import = false };
+    app.capabilities = .{ .web_search = false, .spotify_import = false, .registration_enabled = false };
     var context = httpz.testing.init(.{});
     defer context.deinit();
 
     try read(&app, context.req, context.res);
     try context.expectStatus(200);
-    try context.expectJson(.{ .web_search = false, .spotify_import = false });
+    try context.expectJson(.{ .web_search = false, .spotify_import = false, .registration_enabled = false });
     try context.expectHeader("Cache-Control", "no-store");
 }

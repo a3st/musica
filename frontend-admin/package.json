@@ -1,6 +1,8 @@
 {
   "name": "@musica/frontend-admin",
-  "version": "0.1.0",
+  "version": "0.4.1",
+  "author": "Dmitriy Lukovenko",
+  "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +13,8 @@
     "format": "prettier --write src vite.config.ts svelte.config.js",
     "format:check": "prettier --check src vite.config.ts svelte.config.js",
     "test:i18n": "node tests/unit/i18n.mjs",
-    "test:models": "node tests/unit/models.mjs"
+    "test:models": "node tests/unit/models.mjs",
+    "test:navigation": "node tests/unit/navigation.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.4",

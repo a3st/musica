@@ -5,14 +5,15 @@ services:
     image: postgres:17-bookworm
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-    ports:
-      - "127.0.0.1:${DB_PORT}:5432"
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME}
+      POSTGRES_USER: ${DB_USER:?Set DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    # Доступ с хоста: включите вместе с DB_PORT в .env.
+    # ports:
+    #   - "127.0.0.1:${DB_PORT:?Set DB_PORT}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # SQL files are available for manual execution; never auto-applied.
+      # Миграции выполняются вручную, без docker-entrypoint-initdb.d.
       - ./backend/migrations:/migrations:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
@@ -22,19 +23,19 @@ services:
       start_period: 10s
 
   minio:
+    image: musica-minio:0.4.1
     build:
       context: ./docker/minio
-      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}
-      MINIO_REGION_NAME: ${S3_REGION}
-      S3_BUCKET: ${S3_BUCKET}
-    ports:
-      - "127.0.0.1:${MINIO_API_PORT}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001"
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+      MINIO_REGION_NAME: ${S3_REGION:?Set S3_REGION}
+    # Доступ с хоста: включите нужные порты и переменные в .env.
+    # ports:
+    #   - "127.0.0.1:${MINIO_API_PORT:?Set MINIO_API_PORT}:9000"
+    #   - "127.0.0.1:${MINIO_CONSOLE_PORT:?Set MINIO_CONSOLE_PORT}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -44,48 +45,75 @@ services:
       retries: 10
       start_period: 10s
 
+  minio-init:
+    image: musica-minio:0.4.1
+    pull_policy: never
+    restart: on-failure
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set storage http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY"
+        mc mb --ignore-existing "storage/$$S3_BUCKET"
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET:?Set S3_BUCKET}
+    depends_on:
+      minio:
+        condition: service_healthy
+
   backend:
+    image: musica-backend:0.4.1
     build:
       context: ./backend
-      dockerfile: Dockerfile
     restart: unless-stopped
     init: true
     environment:
-      HTTP_HOST: 0.0.0.0
-      HTTP_PORT: "8080"
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
-      S3_ENDPOINT: http://minio:9000
-      S3_REGION: ${S3_REGION}
-      S3_BUCKET: ${S3_BUCKET}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}
-      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES}
-      HLS_WORKER_ENABLED: ${HLS_WORKER_ENABLED}
-      HLS_TIMEOUT_SECONDS: ${HLS_TIMEOUT_SECONDS}
-      TRACK_METADATA_WORKER_ENABLED: ${TRACK_METADATA_WORKER_ENABLED}
-      TRACK_METADATA_TIMEOUT_SECONDS: ${TRACK_METADATA_TIMEOUT_SECONDS}
-      TRACK_METADATA_TMP_DIR: /tmp/musica-metadata
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE}
-      REGISTRATION_ENABLED: ${REGISTRATION_ENABLED}
-      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME}
-      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
-      SHARED_TRACK_RETENTION_SECONDS: ${SHARED_TRACK_RETENTION_SECONDS}
-      HLS_TMP_DIR: /tmp/musica-hls
-      SPOTIFY_WORKER_ENABLED: ${SPOTIFY_WORKER_ENABLED}
-      WEB_INT_ENABLED: ${WEB_INT_ENABLED}
-      SPOTIFY_INT_ENABLED: ${SPOTIFY_INT_ENABLED}
-      SPOTIFY_TIMEOUT_SECONDS: ${SPOTIFY_TIMEOUT_SECONDS}
-      IMPORTS_TMP_DIR: /tmp/musica-imports
-    ports:
-      - "127.0.0.1:${BACKEND_PORT}:8080"
+      - HTTP_HOST=0.0.0.0
+      - HTTP_PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:?Set DB_NAME}
+      - DB_USER=${DB_USER:?Set DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_REGION=${S3_REGION:?Set S3_REGION}
+      - S3_BUCKET=${S3_BUCKET:?Set S3_BUCKET}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:?Set AUTH_COOKIE_SECURE}
+      - REGISTRATION_ENABLED
+      - BOOTSTRAP_ADMIN_USERNAME
+      - BOOTSTRAP_ADMIN_PASSWORD
+      - MAX_UPLOAD_BYTES
+      - SHARED_TRACK_RETENTION_SECONDS
+      - WEB_INT_ENABLED
+      - SPOTIFY_INT_ENABLED
+      - SPOTIFY_WORKER_ENABLED
+      - SPOTIFY_TIMEOUT_SECONDS
+      - TRACK_METADATA_WORKER_ENABLED
+      - TRACK_METADATA_TIMEOUT_SECONDS
+      - HLS_WORKER_ENABLED
+      - HLS_TIMEOUT_SECONDS
+      - IMPORTS_TMP_DIR=/tmp/musica-imports
+      - TRACK_METADATA_TMP_DIR=/tmp/musica-metadata
+      - HLS_TMP_DIR=/tmp/musica-hls
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
+      minio-init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: musica-frontend:0.4.1
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${NGINX_BIND_ADDRESS:?Set NGINX_BIND_ADDRESS}:${NGINX_PORT:?Set NGINX_PORT}:80"
+    depends_on:
+      backend:
         condition: service_healthy
 
 volumes:

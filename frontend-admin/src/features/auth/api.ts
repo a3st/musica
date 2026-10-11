@@ -7,9 +7,12 @@ export const authApi = {
     return parseUser(await request('/users/me', { ...(signal ? { signal } : {}) }));
   },
 
-  /** Создаёт серверную сессию; токен не сохраняется в JavaScript-хранилищах. */
-  async login(username: string, password: string): Promise<void> {
-    await request('/auth/login', { method: 'POST', ...json({ username, password }) });
+  /** Выполняет вход или регистрацию; токен сессии не сохраняется в JavaScript-хранилищах. */
+  async signIn(username: string, password: string, register: boolean): Promise<void> {
+    await request(register ? '/auth/register' : '/auth/login', {
+      method: 'POST',
+      ...json({ username, password }),
+    });
   },
 
   /** Завершает текущую серверную сессию. */

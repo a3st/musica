@@ -28,10 +28,8 @@
   margin-top: 6px;
 }
 
-.auth-switch {
-  margin: 24px auto 0;
-  display: block;
-  color: var(--accent) !important;
+.auth-dialog a.button {
+  text-decoration: none;
 }
 
 @media (max-width: 760px) {

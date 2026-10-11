@@ -25,6 +25,8 @@ export const english = {
   'settings.saved': 'Preferences are saved on this device.',
   'spotify.includeTrack': 'Include {title}',
   'spotify.excludeTrack': 'Exclude {title}',
+  'spotify.includePlaylist': 'Include playlist {title}',
+  'spotify.excludePlaylist': 'Exclude playlist {title}',
   'search.results': 'Search results',
   'search.libraryResults': 'In your library',
   'search.library': 'Library',
@@ -70,7 +72,7 @@ export const english = {
   'app.home': 'Musica — home',
   'app.offline': 'Offline. Connect to your server to listen.',
   'app.sessionExpired': 'Session expired. Sign in again.',
-  'app.title': 'Musica · Your music',
+  'app.title': 'Musica · Player',
   'app.updateAvailable': 'New version available · Update',
   'auth.credentialsRules':
     'Username: 3–64 characters (a–z, digits or _). Password: at least 12 characters.',

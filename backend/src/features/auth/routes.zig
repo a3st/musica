@@ -14,7 +14,7 @@ pub fn register(router: *httpz.Router(*App, httpz.Action(*App))) void {
 
 /// Создаёт пользователя и сессию, если публичная регистрация разрешена; возвращает 201.
 fn signup(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    if (!app.registration_enabled) return api.failure(res, error.Forbidden);
+    if (!app.isRegistrationEnabled()) return api.failure(res, error.Forbidden);
 
     const input = (try api.readJson(req, res, model.Credentials)) orelse return;
 

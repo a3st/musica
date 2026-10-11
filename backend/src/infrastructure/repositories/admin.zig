@@ -37,7 +37,10 @@ pub fn readStorage(conn: *database.Connection, arena: std.mem.Allocator) !admin_
         \\    'orphaned_bytes', COALESCE(sum(size_bytes) FILTER (WHERE orphaned), 0),
         \\    'tracks', count(*),
         \\    'orphaned_tracks', count(*) FILTER (WHERE orphaned),
-        \\    'pending_tracks', count(*) FILTER (WHERE status = 'pending'),
+        \\    'pending_tracks', count(*) FILTER (WHERE status = 'pending' AND NOT EXISTS (
+        \\        SELECT 1 FROM public.jobs j WHERE j.kind IN ('download_track', 'upload_track')
+        \\        AND j.dedupe_key = files.id::text AND j.state = 'failed'
+        \\    )),
         \\    'hls_segments', COALESCE(sum(hls_segment_count), 0),
         \\    'cleanup_jobs', (SELECT count(*) FROM public.jobs
         \\        WHERE kind = 'delete_s3_objects' AND state IN ('queued', 'processing'))
@@ -46,4 +49,17 @@ pub fn readStorage(conn: *database.Connection, arena: std.mem.Allocator) !admin_
     const body = (try conn.queryText(arena, query, .{})) orelse return error.DatabaseUnavailable;
 
     return std.json.parseFromSliceLeaky(admin_model.Storage, arena, body, .{}) catch error.DatabaseUnavailable;
+}
+
+/// Возвращает полный снимок кандидатов ручной очистки без лимита фонового worker.
+pub fn listCleanupCandidates(conn: *database.Connection, arena: std.mem.Allocator) ![]const []const u8 {
+    const query =
+        \\SELECT COALESCE(json_agg(t.id::text ORDER BY t.orphaned_at, t.id), '[]'::json)::text
+        \\FROM musica.tracks t JOIN musica.users u ON u.id = t.owner_id
+        \\WHERE u.kind = 'system' AND t.catalog_key IS NOT NULL
+        \\AND t.orphaned_at <= clock_timestamp()
+    ;
+    const body = (try conn.queryText(arena, query, .{})) orelse return error.DatabaseUnavailable;
+
+    return std.json.parseFromSliceLeaky([]const []const u8, arena, body, .{});
 }

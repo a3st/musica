@@ -31,7 +31,7 @@ export class StorageState {
     }
   }
 
-  /** Выполняет один пакет очистки без автоматических повторов чувствительного POST. */
+  /** Выполняет ручную очистку всех кандидатов без автоматического повтора чувствительного POST. */
   async cleanup(failure: (error: unknown) => string): Promise<void> {
     if (this.busy || this.disposed) return;
     this.busy = true;

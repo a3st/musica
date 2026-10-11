@@ -44,13 +44,17 @@ pub const App = struct {
     hls_timeout_seconds: u32,
 
     cookie_secure: bool,
-    registration_enabled: bool,
 
     /// Итоговые возможности после проверки зависимостей интеграций при запуске.
     capabilities: capabilities_model.Capabilities,
 
     /// Срок хранения общего трека без ссылок из пользовательских плейлистов.
     shared_track_retention_seconds: u32,
+
+    /// Разрешает регистрацию по итоговым возможностям сервера.
+    pub fn isRegistrationEnabled(self: *const App) bool {
+        return self.capabilities.registration_enabled;
+    }
 
     /// Разрешает импорт, если доступна хотя бы одна интеграция: Web или Spotify.
     pub fn importsEnabled(self: *const App) bool {

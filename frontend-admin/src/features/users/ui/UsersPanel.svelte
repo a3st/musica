@@ -95,7 +95,7 @@
               >{new Date(user.created_at).toLocaleDateString(app.language.locale)}</td
             ><td>{user.tracks}</td><td
               ><button
-                class="icon-button"
+                class="icon-button delete-user"
                 aria-label={`${app.language.t('users.delete')}: ${user.username}`}
                 disabled={user.id === app.user?.id || users.busy}
                 onclick={() => {
@@ -216,6 +216,22 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  .delete-user {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  tbody tr:hover .delete-user,
+  tbody tr:focus-within .delete-user {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .delete-user {
+      opacity: 1;
+    }
   }
 
   small {

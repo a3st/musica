@@ -82,7 +82,7 @@ pub fn fail(db: *database.Database, task: model.Task, retryable: bool) !void {
 
 test "disabled imports reject track creation before accessing the database" {
     var app: App = undefined;
-    app.capabilities = .{ .web_search = false, .spotify_import = false };
+    app.capabilities = .{ .web_search = false, .spotify_import = false, .registration_enabled = false };
 
     try std.testing.expectError(error.ImportsDisabled, enqueueTrack(
         &app,

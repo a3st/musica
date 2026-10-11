@@ -59,8 +59,8 @@ pub fn main(init: std.process.Init) !void {
         .hls_timeout_seconds = config.hls_timeout_seconds,
 
         .cookie_secure = config.cookie_secure,
-        .registration_enabled = config.registration_enabled,
         .capabilities = .{
+            .registration_enabled = config.registration_enabled,
             .web_search = config.web_int_enabled,
             .spotify_import = config.spotify_int_enabled,
         },

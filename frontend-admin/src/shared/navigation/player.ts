@@ -4,7 +4,8 @@ export function playerUrl(): string {
   if (configured) {
     try {
       const url = new URL(configured, window.location.origin);
-      if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password)
+        return url.href;
     } catch {
       // Некорректная настройка не должна блокировать запуск админки.
     }

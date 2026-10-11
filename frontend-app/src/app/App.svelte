@@ -43,11 +43,9 @@
     const track = app.player.value.current;
     document.title = track
       ? app.player.value.paused
-        ? 'Musica'
-        : `${track.title} — ${track.artist} · Musica`
-      : app.library.selected
-        ? `${app.library.selected.title} · Musica`
-        : app.language.t('app.title');
+        ? app.language.t('app.title')
+        : `${track.title} — ${track.artist} · ${app.language.t('app.title')}`
+      : app.language.t('app.title');
   });
 
   $effect(() => {
@@ -96,8 +94,20 @@
   }
 </script>
 
-<svelte:document onkeydown={keydown} />
+<svelte:document
+  onkeydown={keydown}
+  onvisibilitychange={() => {
+    app.language.sync();
+    void app.checkSession();
+  }}
+/>
 <svelte:window
+  onfocus={() => {
+    app.language.sync();
+    void app.checkSession();
+  }}
+  onstorage={() => app.language.sync()}
+  onpageshow={() => void app.checkSession()}
   onhashchange={() => app.run(app.openSession())}
   ononline={() => {
     app.online = true;
@@ -134,7 +144,6 @@
   bind:open={app.authOpen}
   authenticated={app.auth.user !== null}
   language={app.language}
-  signIn={(username, password, register) => app.signIn(username, password, register)}
 />
 <PlaylistEditor state={app.editor} language={app.language} />
 <UploadDialog

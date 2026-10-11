@@ -67,13 +67,13 @@ pub fn readStorage(app: *App, arena: std.mem.Allocator, user: []const u8) !model
     return repository.readStorage(conn, arena);
 }
 
-/// Удаляет до 20 orphaned-треков без ожидания retention; активные операции пропускает.
+/// Удаляет все найденные orphaned-треки без ожидания retention; активные операции пропускает.
 /// Проверяет привязки под блокировкой, файлы удаляет существующий S3 worker.
 pub fn cleanupOrphaned(app: *App, arena: std.mem.Allocator, user: []const u8) !model.Cleanup {
     const conn = try app.db.acquire();
     defer conn.release();
     try users_repository.requireAdmin(conn, arena, user);
-    const ids = try web_int_repository.listCleanupCandidates(conn, arena, 0);
+    const ids = try repository.listCleanupCandidates(conn, arena);
     var result: model.Cleanup = .{ .removed = 0, .skipped = 0 };
 
     for (ids) |id| {

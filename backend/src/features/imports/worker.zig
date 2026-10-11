@@ -149,7 +149,7 @@ fn downloadAndPublish(app: *App, arena: std.mem.Allocator, task: model.Task) any
 
 test "disabled imports do not claim jobs or launch external processes" {
     var app: App = undefined;
-    app.capabilities = .{ .web_search = false, .spotify_import = false };
+    app.capabilities = .{ .web_search = false, .spotify_import = false, .registration_enabled = false };
 
     try run(&app);
 }

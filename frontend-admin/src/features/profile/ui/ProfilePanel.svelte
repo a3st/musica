@@ -62,8 +62,8 @@
   <section class="settings-section">
     <h2>{app.language.t('profile.account')}</h2>
     <div class="settings-row">
-      <span>{app.user?.username}</span>
-      <span class="account-role">{app.user?.role}</span>
+      <span>{app.language.t('profile.username')}</span>
+      <strong>{app.user?.username}</strong>
     </div>
     <div class="settings-row">
       <span
@@ -167,14 +167,3 @@
     </div>
   </form>
 </Dialog>
-
-<style>
-  .account-role {
-    justify-self: end;
-    font-size: 12px;
-    padding: 5px 10px;
-    border-radius: 20px;
-    background: var(--active);
-    color: var(--accent);
-  }
-</style>

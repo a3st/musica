@@ -32,11 +32,15 @@ export function selectSpotifyTracks(
   excluded: ReadonlySet<string>,
 ): SpotifyImport {
   return {
-    playlists: input.playlists.map((playlist, group) => ({
-      ...playlist,
-      tracks: playlist.tracks.filter((_, index) => !excluded.has(`playlist:${group}:${index}`)),
-    })),
-    library: input.library.filter((_, index) => !excluded.has(`library:${index}`)),
+    playlists: input.playlists
+      .map((playlist, group) => ({
+        ...playlist,
+        tracks: playlist.tracks.filter((_, index) => !excluded.has(`playlist:${group}:${index}`)),
+      }))
+      .filter((_, group) => !excluded.has(`playlist:${group}`)),
+    library: excluded.has('library')
+      ? []
+      : input.library.filter((_, index) => !excluded.has(`library:${index}`)),
   };
 }
 

@@ -12,6 +12,17 @@
 
   const app = new Application();
   const player = playerUrl();
+  let profileOpen = $state(false);
+  let profile = $state<HTMLDivElement>();
+
+  /** Закрывает меню профиля при клике снаружи или Escape. */
+  function closeProfile(event: MouseEvent | KeyboardEvent): void {
+    if (event instanceof KeyboardEvent) {
+      if (event.key === 'Escape') profileOpen = false;
+    } else if (event.target instanceof Node && profile && !profile.contains(event.target)) {
+      profileOpen = false;
+    }
+  }
   setApplication(app);
 
   onMount(() => {
@@ -26,48 +37,70 @@
   });
 </script>
 
+<svelte:window
+  onpopstate={() => app.restorePage()}
+  onstorage={() => app.language.sync()}
+  onfocus={() => app.language.sync()}
+/>
+<svelte:document
+  onclick={closeProfile}
+  onkeydown={closeProfile}
+  onvisibilitychange={() => app.language.sync()}
+/>
 <div class="admin-shell">
   <header class="topbar">
     <a class="brand" href={player} aria-label={app.language.t('admin.home')}>
-      <img src="/icon.svg" width="32" height="32" alt="" /><span>musica</span>
+      <img src={`${import.meta.env.BASE_URL}icon.svg`} width="32" height="32" alt="" /><span
+        >musica</span
+      >
     </a>
     {#if app.user}
-      <div class="profile-actions">
+      <div class="profile-actions" bind:this={profile}>
         <button
+          id="profile-toggle"
           class="profile"
-          onclick={() => (app.page = 'profile')}
-          aria-label={app.language.t('nav.profile')}
-          ><span>{app.user.username}</span><span class="avatar-ring"
-            ><Avatar name={app.user.username} size={32} /></span
-          ></button
+          onclick={() => (profileOpen = !profileOpen)}
+          aria-label={app.language.t('profile.menu')}
+          aria-expanded={profileOpen}
+          aria-controls="profile-menu"
         >
-        <button class="button logout" onclick={() => app.logout()}
-          ><Icon name="logout" /><span>{app.language.t('common.logout')}</span></button
-        >
+          <span class="avatar-ring"><Avatar name={app.user.username} size={32} /></span>
+        </button>
+        {#if profileOpen}
+          <div id="profile-menu" class="profile-menu">
+            <button
+              onclick={() => {
+                profileOpen = false;
+                void app.logout();
+              }}
+            >
+              <Icon name="logout" />{app.language.t('common.logout')}
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
   </header>
   <div class="workspace">
     <aside class="sidebar">
-      <span class="nav-label">{app.language.t('nav.label')}</span>
       <nav aria-label={app.language.t('nav.label')}>
         <button
           class:active={app.page === 'profile'}
           aria-current={app.page === 'profile' ? 'page' : undefined}
-          onclick={() => (app.page = 'profile')}
+          onclick={() => app.selectPage('profile')}
           ><Icon name="profile" />{app.language.t('nav.profile')}</button
         >
         {#if app.user?.role === 'admin'}
           <button
             class:active={app.page === 'users'}
             aria-current={app.page === 'users' ? 'page' : undefined}
-            onclick={() => (app.page = 'users')}
+            onclick={() => app.selectPage('users')}
             ><Icon name="users" />{app.language.t('nav.users')}</button
           >
           <button
             class:active={app.page === 'storage'}
             aria-current={app.page === 'storage' ? 'page' : undefined}
-            onclick={() => (app.page = 'storage')}
+            onclick={() => app.selectPage('storage')}
             ><Icon name="storage" />{app.language.t('nav.storage')}</button
           >
         {/if}
@@ -142,11 +175,37 @@
     transform: scale(0.97);
   }
 
-  .profile > span:first-child {
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .profile-actions {
+    position: relative;
+  }
+
+  .profile-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 20;
+    min-width: 180px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 12px 32px #18243b18;
+  }
+
+  .profile-menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    text-align: left;
+  }
+
+  .profile-menu button:hover {
+    background: var(--hover);
   }
 
   .avatar-ring {
@@ -173,16 +232,8 @@
   }
 
   .sidebar {
-    padding: 28px 14px;
-  }
-
-  .nav-label {
-    display: block;
-    padding: 0 14px 20px;
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
+    padding: 14px;
+    align-self: start;
   }
 
   nav button {
@@ -243,17 +294,13 @@
       gap: 8px;
     }
 
-    .profile > span:first-child,
-    .logout span {
-      display: none;
-    }
-
     .profile-actions {
       gap: 6px;
     }
 
     .workspace {
       grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
       margin-top: 10px;
       gap: 10px;
     }
@@ -262,20 +309,21 @@
       padding: 8px;
     }
 
-    .nav-label {
-      display: none;
-    }
-
     nav {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      overflow-x: auto;
       gap: 6px;
     }
 
     nav button {
       width: auto;
+      flex-shrink: 0;
       margin: 0;
-      padding: 10px;
+      padding: 9px;
+      gap: 8px;
+      font-size: 12px;
+      white-space: nowrap;
     }
 
     main {

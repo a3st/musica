@@ -201,7 +201,8 @@ try {
   assert.equal(await page.locator('#refresh').count(), 0);
   await page.locator('#profile-toggle').click();
   assert.equal(await page.locator('.profile-menu-heading').count(), 0);
-  await page.locator('#profile-menu a').click();
+  assert.equal(new URL(await page.locator('#profile-menu a').getAttribute('href')).pathname, '/profile/');
+  await page.locator('#profile-toggle').click();
   assert.equal(await page.locator('#profile-menu').isVisible(), false);
   await page.locator('#devices-toggle').click();
   await page.locator('#devices-dialog[open]').waitFor();
@@ -734,17 +735,17 @@ try {
   assert.equal(await page.locator('#auth-dialog').isVisible(), true, 'Escape cannot dismiss mandatory login');
   await page.mouse.click(1, 1);
   assert.equal(await page.locator('#auth-dialog').isVisible(), true, 'backdrop cannot dismiss mandatory login');
-  await page.locator('#auth-form [name="username"]').fill('music_lover');
-  await page.locator('#auth-form [name="password"]').fill('wrong-password-123');
-  await page.locator('#auth-submit').click();
-  await page.waitForFunction(() => document.querySelector('#auth-error').textContent.length > 0);
-  assert.equal(await page.locator('#auth-error').isVisible(), true, 'login errors remain visible inside the form');
-  assert.equal(await page.locator('#toast').isVisible(), false);
-  await page.locator('#auth-form [name="password"]').fill('test-password-123');
+  assert.equal(await page.locator('#auth-form').count(), 0, 'credentials belong to Musica Profile');
+  const destination = new URL(await page.locator('#auth-submit').getAttribute('href'));
+  assert.equal(destination.pathname, '/profile/');
+  assert.equal(destination.searchParams.get('return_to'), page.url());
+  authenticated = true;
+  await page.context().addCookies([{ name: 'musica_session', value: 'b'.repeat(64), url: base }]);
   const firstTrack = tracks.find(track => track.title === 'New song');
   assert.equal(firstTrack.status, 'streamed');
   firstTrack.status = 'ready';
-  await page.locator('#auth-submit').click(); await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.getByRole('heading', { name: 'Uploads', exact: true }).waitFor();
   verifyPlaybackCookie = true;
   // Exercise preparation as well as HLS requests on the first play after login.
   await page.locator(`[data-play="${firstTrack.id}"]`).click();

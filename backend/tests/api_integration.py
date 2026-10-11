@@ -212,19 +212,6 @@ def run_api_checks(optimize="Debug", backend_image=None):
             "-f",
             "/migrations/001_init.sql",
         )
-        migrated_track = execute_sql(
-            "WITH owner AS (INSERT INTO musica.users(username,kind) VALUES ('migration_fixture','system') RETURNING id) "
-            "INSERT INTO musica.tracks(title,artist,owner_id,storage_bucket,object_key,status,content_type,size_bytes,uploaded_at) "
-            "SELECT 'Migration fixture','Test',id,'historical','existing.mp3','ready','audio/mpeg',100,now() FROM owner RETURNING id::text"
-        ).splitlines()[0]
-        run_compose(
-            "exec", "-T", "postgres", "psql", "-U", "musica", "-d", "musica",
-            "-v", "ON_ERROR_STOP=1", "-f", "/migrations/002_track_metadata.sql",
-        )
-        assert json.loads(execute_sql(f"SELECT payload FROM public.jobs WHERE kind='inspect_track' AND dedupe_key='{migrated_track}'")) == {
-            'track_id': migrated_track, 'bucket': 'historical', 'key': 'existing.mp3', 'size': 100,
-        }
-        execute_sql(f"DELETE FROM public.jobs WHERE kind='inspect_track' AND dedupe_key='{migrated_track}'; DELETE FROM musica.tracks WHERE id='{migrated_track}'; DELETE FROM musica.playlists WHERE owner_id=(SELECT id FROM musica.users WHERE username='migration_fixture'); DELETE FROM musica.users WHERE username='migration_fixture'")
         assert execute_sql((
             "SELECT string_agg(table_schema || '.' || table_name, ',' ORDER BY table_schema, "
             "table_name) FROM information_schema.tables WHERE table_schema IN ('musica','public') "
@@ -314,7 +301,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
         else:
             raise RuntimeError("backend did not start")
 
-        assert api_request("GET", "/api/capabilities") == {"web_search": True, "spotify_import": True}
+        assert api_request("GET", "/api/capabilities") == {"web_search": True, "spotify_import": True, "registration_enabled": True}
 
         password = "integration-password-123"
         alice = api_request(

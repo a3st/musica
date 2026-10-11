@@ -25,25 +25,14 @@
       : []),
   ]);
   const active = $derived(groups[selected] ?? groups[0]);
+  const activeKey = $derived(
+    selected < (controller.input?.playlists.length ?? 0) ? `playlist:${selected}` : 'library',
+  );
 
   $effect(() => {
     controller.input;
     selected = 0;
   });
-
-  const summary = $derived(
-    controller.readingFiles
-      ? language.t('spotify.reading')
-      : controller.preview && controller.input
-        ? language.t('spotify.preview', {
-            tracks: controller.selectedTracks,
-            playlists: controller.input.playlists.length,
-            skipped: controller.preview.skipped
-              ? language.t('spotify.skipped', { count: controller.preview.skipped })
-              : '',
-          })
-        : '',
-  );
 </script>
 
 <Dialog
@@ -128,6 +117,9 @@
           }}
         />
       </div>
+      {#if controller.readingFiles}<p class="muted" role="status">
+          {language.t('spotify.reading')}
+        </p>{/if}
       {#if active}
         <div class="spotify-preview">
           <div class="spotify-column">
@@ -139,17 +131,40 @@
               aria-label={language.t('playlists.label')}
             >
               {#each groups as group, index (index)}
-                <button
-                  type="button"
-                  class:active={selected === index}
-                  aria-pressed={selected === index}
-                  onclick={() => {
-                    selected = index;
-                  }}
-                >
-                  <strong>{group.title}</strong>
-                  <span>{language.t('playlists.trackCount', { count: group.tracks.length })}</span>
-                </button>
+                {@const key =
+                  index < (controller.input?.playlists.length ?? 0)
+                    ? `playlist:${index}`
+                    : 'library'}
+                <div class="spotify-playlist-row" class:excluded={controller.excluded.has(key)}>
+                  <button
+                    type="button"
+                    class="spotify-group-select"
+                    class:active={selected === index}
+                    aria-pressed={selected === index}
+                    onclick={() => {
+                      selected = index;
+                    }}
+                  >
+                    <strong>{group.title}</strong>
+                    <span>{language.t('playlists.trackCount', { count: group.tracks.length })}</span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-button spotify-group-toggle"
+                    disabled={controller.busy}
+                    aria-pressed={!controller.excluded.has(key)}
+                    aria-label={language.t(
+                      controller.excluded.has(key)
+                        ? 'spotify.includePlaylist'
+                        : 'spotify.excludePlaylist',
+                      { title: group.title },
+                    )}
+                    onclick={() => controller.toggle(key)}
+                  >
+                    <Icon name={controller.excluded.has(key) ? 'plus' : 'minus'} />
+                  </button>
+                </div>
               {/each}
             </div>
             <CollectionScrollbar
@@ -171,13 +186,17 @@
                     selected < (controller.input?.playlists.length ?? 0)
                       ? `playlist:${selected}:${index}`
                       : `library:${index}`}
-                  <li class:excluded={controller.excluded.has(key)}>
+                  <li
+                    class:excluded={controller.excluded.has(activeKey) ||
+                      controller.excluded.has(key)}
+                  >
                     <div><strong>{track.title}</strong><span>{track.artist}</span></div>
                     <button
                       type="button"
                       class="icon-button"
-                      disabled={controller.busy}
-                      aria-pressed={!controller.excluded.has(key)}
+                      disabled={controller.busy || controller.excluded.has(activeKey)}
+                      aria-pressed={!controller.excluded.has(activeKey) &&
+                        !controller.excluded.has(key)}
                       aria-label={language.t(
                         controller.excluded.has(key)
                           ? 'spotify.includeTrack'
@@ -210,7 +229,6 @@
         >{language.t('spotify.submit')}<Icon name="arrow" /></button
       >
     </form>
-    <p id="spotify-summary" aria-live="polite">{summary}</p>
     <p id="spotify-progress" aria-live="polite">{controller.notice}</p>
   </div>
   <CollectionScrollbar contained target={bodyScroll} label={language.t('playlists.scroll')} />

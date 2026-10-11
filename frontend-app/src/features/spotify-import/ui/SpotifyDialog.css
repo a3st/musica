@@ -84,6 +84,31 @@
   background: var(--active);
 }
 
+.spotify-playlist-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.spotify-playlists .spotify-group-select {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.spotify-playlist-row.excluded .spotify-group-select {
+  opacity: 0.45;
+}
+
+.spotify-playlists .spotify-group-toggle {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  padding: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
 .spotify-playlists strong,
 .spotify-tracks strong,
 .spotify-tracks h3 {

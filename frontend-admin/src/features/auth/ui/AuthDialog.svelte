@@ -7,10 +7,11 @@
   let open = $state(true);
   let username = $state('');
   let password = $state('');
+  let registering = $state(false);
   let busy = $state(false);
   let error = $state('');
 
-  /** Входит в существующий аккаунт; очищает пароль из состояния после запроса. */
+  /** Выполняет вход или регистрацию; очищает пароль из состояния после запроса. */
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (busy) return;
@@ -18,7 +19,7 @@
     error = '';
 
     try {
-      await app.login(username, password);
+      await app.signIn(username, password, registering);
     } catch (failure) {
       error = app.failure(failure);
     } finally {
@@ -30,10 +31,14 @@
 
 <Dialog id="auth-dialog" class="auth-dialog" bind:open dismissible={false}>
   <span class="eyebrow">{app.language.t('auth.welcome')}</span>
-  <h2>{app.language.t('auth.heading')}<br />{app.language.t('auth.suffix')}<span>.</span></h2>
+  <h2>
+    {app.language.t(registering ? 'auth.registerHeading' : 'auth.heading')}<br />{app.language.t(
+      registering ? 'auth.registerSuffix' : 'auth.suffix',
+    )}<span>.</span>
+  </h2>
   <p class="muted">{app.language.t('auth.subtitle')}</p>
   {#if app.notice}<p class="notice" role="status">{app.notice}</p>{/if}
-  <form onsubmit={submit}>
+  <form id="auth-form" onsubmit={submit}>
     <label
       >{app.language.t('auth.username')}<input
         name="username"
@@ -50,7 +55,7 @@
       >{app.language.t('auth.password')}<input
         name="password"
         type="password"
-        autocomplete="current-password"
+        autocomplete={registering ? 'new-password' : 'current-password'}
         minlength="12"
         maxlength="1024"
         placeholder={app.language.t('auth.placeholder')}
@@ -58,13 +63,25 @@
         bind:value={password}
       /></label
     >
-    <p class="form-error" role="alert">{error || app.error}</p>
-    <button class="button primary wide" disabled={busy}
-      >{busy ? app.language.t('common.loading') : app.language.t('auth.signIn')}<Icon
+    <p id="auth-error" class="form-error" role="alert">{error || app.error}</p>
+    <button id="auth-submit" class="button primary wide" disabled={busy}
+      >{busy
+        ? app.language.t('common.loading')
+        : app.language.t(registering ? 'auth.register' : 'auth.signIn')}<Icon
         name="arrow"
       /></button
     >
   </form>
+  {#if app.registrationEnabled}<button
+      id="auth-switch"
+      class="text-button auth-switch"
+      disabled={busy}
+      onclick={() => {
+        registering = !registering;
+        password = '';
+        error = '';
+      }}>{app.language.t(registering ? 'auth.loginLink' : 'auth.registerLink')}</button
+    >{/if}
 </Dialog>
 
 <style>
@@ -91,6 +108,15 @@
 
   .muted {
     margin-bottom: 28px;
+  }
+
+  .auth-switch {
+    display: block;
+    margin: 20px auto 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
   }
 
   @media (max-width: 760px) {

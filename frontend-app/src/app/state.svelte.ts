@@ -90,6 +90,8 @@ export class Application {
 
   private toastTimer?: ReturnType<typeof setTimeout>;
   private polling = false;
+  private checkingSession = false;
+  private sessionCheckController?: AbortController;
   private disposed = false;
   /** Версия запрещает ответам прежней сессии изменять актуальное состояние. */
   private sessionVersion = 0;
@@ -201,14 +203,40 @@ export class Application {
     return false;
   }
 
-  /** Создаёт сессию и загружает библиотеку, предварительно сбрасывая прежнее состояние. */
-  async signIn(username: string, password: string, register: boolean): Promise<void> {
-    // Инвалидируем прежние запросы до замены cookie сессии.
-    this.reset();
-    this.authOpen = true;
-    await authApi.signIn(username, password, register);
-    await this.openSession();
-    await this.syncUploadsMembership();
+  /** Проверяет сессию при возврате из профиля, не прерывая воспроизведение того же пользователя. */
+  async checkSession(): Promise<void> {
+    if (
+      this.disposed ||
+      this.sessionLoading ||
+      this.checkingSession ||
+      !this.online ||
+      document.visibilityState !== 'visible'
+    )
+      return;
+
+    this.checkingSession = true;
+    const version = this.sessionVersion;
+    const controller = (this.sessionCheckController = new AbortController());
+
+    try {
+      const user = await authApi.me(controller.signal);
+      if (version !== this.sessionVersion || this.disposed) return;
+
+      if (user.id !== this.auth.user?.id) {
+        this.reset();
+        await this.start();
+      }
+    } catch (error) {
+      if (version !== this.sessionVersion || this.disposed) return;
+
+      if (error instanceof ApiError && error.status === 401 && this.auth.user) {
+        this.reset();
+        this.authOpen = true;
+      }
+    } finally {
+      this.checkingSession = false;
+      this.sessionCheckController = undefined;
+    }
   }
 
   /** Восстанавливает сессию или доступ по ссылке и обрабатывает ошибки входа. */
@@ -577,6 +605,7 @@ export class Application {
 
   /** Сбрасывает данные сессии и инвалидирует незавершённые операции. */
   reset(): void {
+    this.sessionCheckController?.abort();
     this.uploadsMembershipController?.abort();
     this.uploadsTrackIds = null;
     this.currentTrackAdding = null;
@@ -599,6 +628,7 @@ export class Application {
 
   /** Освобождает плеер, запросы и таймер уведомления при завершении приложения. */
   dispose(): void {
+    this.sessionCheckController?.abort();
     this.uploadsMembershipController?.abort();
     this.disposed = true;
     this.sessionVersion++;

@@ -1,9 +1,13 @@
 {
   "name": "@musica/frontend-app",
-  "version": "0.1.0",
+  "version": "0.4.1",
+  "author": "Dmitriy Lukovenko",
+  "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "scripts": {
+    "test:auth-ui": "node tests/e2e/auth.mjs",
+    "test:profile-ui": "node tests/e2e/profile.mjs",
     "dev": "vite --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "build": "npm run check && vite build",

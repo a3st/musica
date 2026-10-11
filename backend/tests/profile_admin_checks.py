@@ -84,5 +84,33 @@ def check_profile_and_admin(api_request, execute_sql):
     stats = api_request("GET", "/api/admin/storage", token=token)
     assert stats["source_bytes"] == stats["user_bytes"] + stats["system_bytes"]
     assert stats["orphaned_bytes"] <= stats["system_bytes"]
-    api_request("POST", "/api/admin/storage/cleanup-orphaned", token=token)
+
+    # A terminal download must not count as waiting, unlike a queued upload.
+    failed_track = api_request("POST", "/api/tracks", {
+        "title": "Failed import counter", "artist": "Test",
+    }, token=token, expected=201)["id"]
+    before = api_request("GET", "/api/admin/storage", token=token)["pending_tracks"]
+    execute_sql(f"""
+        INSERT INTO public.jobs(kind, dedupe_key, state, payload)
+        VALUES ('download_track', '{failed_track}', 'failed', '{{}}');
+    """)
+    assert api_request("GET", "/api/admin/storage", token=token)["pending_tracks"] == before - 1
+    execute_sql(f"UPDATE public.jobs SET state='queued' WHERE kind='download_track' AND dedupe_key='{failed_track}'")
+    assert api_request("GET", "/api/admin/storage", token=token)["pending_tracks"] == before
+
+    # Manual cleanup must exceed the background worker's 20-track batch.
+    system = execute_sql("SELECT id FROM musica.users WHERE kind='system' LIMIT 1")
+    if not system:
+        system = execute_sql("INSERT INTO musica.users(username, kind) VALUES ('cleanup_system_fixture', 'system') RETURNING id")
+    fixtures = [str(uuid.uuid4()) for _ in range(23)]
+    for fixture in fixtures:
+        execute_sql(f"""
+            INSERT INTO musica.tracks(id, owner_id, title, artist, storage_bucket, object_key, catalog_key, orphaned_at)
+            VALUES ('{fixture}', '{system}', 'Cleanup fixture', 'Test', 'uploads',
+                'fixture/{fixture}', 'fixture:{fixture}', clock_timestamp() - interval '1 hour');
+        """)
+    result = api_request("POST", "/api/admin/storage/cleanup-orphaned", token=token)
+    assert result["removed"] >= len(fixtures), result
+    identifiers = ",".join(f"'{fixture}'" for fixture in fixtures)
+    assert execute_sql(f"SELECT count(*) FROM musica.tracks WHERE id IN ({identifiers})") == "0"
     print("PASS: profile password change, session revocation, account deletion rollback, admin ACL and source cleanup.")

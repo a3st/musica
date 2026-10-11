@@ -10,7 +10,14 @@
   const storage = new StorageState();
   let confirm = $state(false);
   const value = $derived(storage.value);
-  const share = $derived(value?.source_bytes ? (value.user_bytes / value.source_bytes) * 100 : 0);
+  const userShare = $derived(
+    value?.source_bytes ? (value.user_bytes / value.source_bytes) * 100 : 0,
+  );
+  const systemShare = $derived(
+    value?.source_bytes
+      ? ((value.user_bytes + value.system_bytes - value.orphaned_bytes) / value.source_bytes) * 100
+      : 0,
+  );
 
   onMount(() => {
     void storage.refresh((error) => app.failure(error));
@@ -27,12 +34,6 @@
 <section class="settings-page">
   <div class="page-heading">
     <h1>{app.language.t('storage.title')}</h1>
-    <button
-      class="button"
-      disabled={storage.loading || storage.busy}
-      onclick={() => storage.refresh((error) => app.failure(error))}
-      ><Icon name="refresh" />{app.language.t('common.refresh')}</button
-    >
   </div>
   <p class="form-error" role="alert">{storage.error}</p>
   {#if storage.loading && !value}<p class="muted" role="status">
@@ -46,7 +47,7 @@
         <div
           class="donut"
           class:empty={value.source_bytes === 0}
-          style={`--share:${share}%`}
+          style={`--user-share:${userShare}%;--system-share:${systemShare}%`}
           aria-hidden="true"
         ></div>
         <div class="chart-details">
@@ -58,14 +59,19 @@
           </div>
           <div class="legend">
             <i class="system-color"></i>{app.language.t('storage.system')}<strong
-              >{formatBytes(value.system_bytes, app.language.locale)}</strong
+              >{formatBytes(value.system_bytes - value.orphaned_bytes, app.language.locale)}</strong
             >
+          </div>
+          <div class="legend">
+            <i class="orphan-color"></i>{app.language.t('storage.orphaned')}<strong>
+              {formatBytes(value.orphaned_bytes, app.language.locale)}
+            </strong>
           </div>
           {#if !value.source_bytes}<p class="muted">{app.language.t('storage.empty')}</p>{/if}
         </div>
       </div>
       <div class="counters">
-        {#each [['storage.total', value.tracks], ['storage.pending', value.pending_tracks], ['storage.segments', value.hls_segments], ['storage.jobs', value.cleanup_jobs]] as [key, count]}
+        {#each [['storage.total', value.tracks], ['storage.orphaned', value.orphaned_tracks], ['storage.pending', value.pending_tracks], ['storage.segments', value.hls_segments], ['storage.jobs', value.cleanup_jobs]] as [key, count]}
           <div class="counter">
             <strong>{count}</strong><span>{app.language.t(key as 'storage.total')}</span>
           </div>
@@ -73,34 +79,19 @@
       </div>
     </section>
     <section class="settings-section red-zone">
-      <h2>{app.language.t('storage.redZone')}</h2>
-      <div class="settings-row">
+      <div class="settings-row cleanup-row">
         <span
-          >{app.language.t('storage.orphaned')}<small
-            >{app.language.t('storage.orphanedHint')}</small
+          >{app.language.t('storage.cleanup')}<small>{app.language.t('storage.orphanedHint')}</small
           ></span
         >
-        <strong
-          >{value.orphaned_tracks} · {formatBytes(
-            value.orphaned_bytes,
-            app.language.locale,
-          )}</strong
+        <button
+          class="button danger-outline"
+          disabled={storage.busy || storage.loading || !value.orphaned_tracks}
+          onclick={() => (confirm = true)}
         >
+          <Icon name="trash" />{app.language.t(storage.busy ? 'common.loading' : 'storage.cleanup')}
+        </button>
       </div>
-      <div class="orphan-bar" aria-hidden="true">
-        <span
-          style={`width:${value.source_bytes ? (value.orphaned_bytes / value.source_bytes) * 100 : 0}%`}
-        ></span>
-      </div>
-      <button
-        class="button danger-outline"
-        disabled={storage.busy || storage.loading || !value.orphaned_tracks}
-        onclick={() => (confirm = true)}
-        ><Icon name="trash" />{app.language.t(
-          storage.busy ? 'common.loading' : 'storage.cleanup',
-        )}</button
-      >
-      <p class="muted">{app.language.t('storage.batchHint')}</p>
       {#if storage.result}<p class="notice" role="status">
           {app.language.t('storage.cleanupResult', storage.result)}
         </p>{/if}
@@ -139,7 +130,11 @@
     height: 180px;
     flex-shrink: 0;
     border-radius: 50%;
-    background: conic-gradient(var(--accent) var(--share), #a88be7 var(--share));
+    background: conic-gradient(
+      var(--accent) 0 var(--user-share),
+      #a88be7 var(--user-share) var(--system-share),
+      var(--danger) var(--system-share) 100%
+    );
     position: relative;
   }
 
@@ -197,7 +192,7 @@
 
   .counters {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 12px;
   }
 
@@ -218,18 +213,12 @@
     font-size: 12px;
   }
 
-  .orphan-bar {
-    height: 8px;
-    border-radius: 8px;
-    overflow: hidden;
-    background: #f7e5e9;
-    margin-bottom: 24px;
+  .orphan-color {
+    background: var(--danger);
   }
 
-  .orphan-bar span {
-    display: block;
-    height: 100%;
-    background: var(--danger);
+  .cleanup-row {
+    align-items: center;
   }
 
   @media (max-width: 760px) {
