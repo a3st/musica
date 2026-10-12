@@ -6,6 +6,8 @@ const YtDlp = @import("providers/yt_dlp.zig").YtDlp;
 pub const Settings = struct {
     ytdlp_path: []const u8,
     ffmpeg_path: []const u8,
+    /// Необязательный proxy только для yt-dlp; строка заимствуется.
+    ytdlp_proxy: ?[]const u8 = null,
 
     /// Провайдеры вызываются по порядку; пустой список запрещает скачивание.
     providers: []const model.Provider = &.{.yt_dlp},
@@ -21,7 +23,7 @@ pub const Downloader = struct {
     pub fn init(settings: Settings) Downloader {
         return .{
             .providers = settings.providers,
-            .yt_dlp = YtDlp.init(settings.ytdlp_path, settings.ffmpeg_path),
+            .yt_dlp = YtDlp.init(settings.ytdlp_path, settings.ffmpeg_path, settings.ytdlp_proxy),
         };
     }
 

@@ -25,6 +25,8 @@ pub const Config = struct {
     ffmpeg_path: []const u8,
     ffprobe_path: []const u8,
     ytdlp_path: []const u8,
+    /// Необязательный адрес proxy для yt-dlp; пустое значение отключает явную настройку.
+    ytdlp_proxy: ?[]const u8,
 
     // Доступность интеграций.
     /// Разрешает маршруты Web и запуск общего worker скачивания.
@@ -75,6 +77,7 @@ pub const Config = struct {
             .ffmpeg_path = env.get("FFMPEG_PATH") orelse "ffmpeg",
             .ffprobe_path = env.get("FFPROBE_PATH") orelse "ffprobe",
             .ytdlp_path = env.get("YTDLP_PATH") orelse "yt-dlp",
+            .ytdlp_proxy = loadOptionalString(env, "YTDLP_PROXY"),
 
             .web_int_enabled = try parseBoolean(env.get("WEB_INT_ENABLED") orelse "true"),
             .spotify_int_enabled = try parseBoolean(env.get("SPOTIFY_INT_ENABLED") orelse "true"),
@@ -139,6 +142,23 @@ fn loadHttpAddress(env: *const std.process.Environ.Map) !std.Io.net.IpAddress {
 
     return std.Io.net.IpAddress.parse(env.get("HTTP_HOST") orelse "127.0.0.1", port) catch
         error.InvalidConfiguration;
+}
+
+test "yt-dlp proxy is optional and preserves the configured address" {
+    var env = std.process.Environ.Map.init(std.testing.allocator);
+    defer env.deinit();
+
+    try env.put("DB_PASSWORD", "fixture-db-password");
+    try env.put("S3_ACCESS_KEY_ID", "fixture-access");
+    try env.put("S3_SECRET_ACCESS_KEY", "fixture-secret");
+
+    try std.testing.expect((try Config.load(&env)).ytdlp_proxy == null);
+    try env.put("YTDLP_PROXY", "");
+    try std.testing.expect((try Config.load(&env)).ytdlp_proxy == null);
+
+    const proxy = "http://proxy.example.com:3128";
+    try env.put("YTDLP_PROXY", proxy);
+    try std.testing.expectEqualStrings(proxy, (try Config.load(&env)).ytdlp_proxy.?);
 }
 
 test "imports work with either integration and stop only when both are disabled" {

@@ -7,10 +7,12 @@ pub const YtDlp = struct {
     path: []const u8,
     /// Заимствованный путь к FFmpeg для конвертации и встраивания обложки.
     ffmpeg_path: []const u8,
+    /// Заимствованный адрес proxy; null сохраняет сетевые настройки yt-dlp по умолчанию.
+    proxy: ?[]const u8,
 
     /// Сохраняет пути без выделения памяти; они должны жить дольше экземпляра.
-    pub fn init(path: []const u8, ffmpeg_path: []const u8) YtDlp {
-        return .{ .path = path, .ffmpeg_path = ffmpeg_path };
+    pub fn init(path: []const u8, ffmpeg_path: []const u8, proxy: ?[]const u8) YtDlp {
+        return .{ .path = path, .ffmpeg_path = ffmpeg_path, .proxy = proxy };
     }
 
     /// Сохраняет source.mp3 в dir; при отмене останавливает процесс.
@@ -60,7 +62,7 @@ pub const YtDlp = struct {
         });
         const max_size = try std.fmt.allocPrint(arena, "{d}", .{max_bytes});
         // No shell, user URL or filename is accepted; the search is always one argv element.
-        return arena.dupe([]const u8, &.{
+        const arguments = [_][]const u8{
             self.path,
             "--ignore-config",
             "--no-playlist",
@@ -98,7 +100,17 @@ pub const YtDlp = struct {
             "source.%(ext)s",
             "--",
             query,
-        });
+        };
+
+        const proxy = self.proxy orelse return arena.dupe([]const u8, &arguments);
+        const argv = try arena.alloc([]const u8, arguments.len + 2);
+        const options_end = arguments.len - 2;
+        @memcpy(argv[0..options_end], arguments[0..options_end]);
+        argv[options_end] = "--proxy";
+        argv[options_end + 1] = proxy;
+        @memcpy(argv[options_end + 2 ..], arguments[options_end..]);
+
+        return argv;
     }
 };
 
@@ -106,7 +118,7 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    const provider = YtDlp.init("yt-dlp", "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe");
+    const provider = YtDlp.init("yt-dlp", "C:\\Program Files\\FFmpeg\\bin\\ffmpeg.exe", null);
     const argv = try provider.buildArguments(arena.allocator(), .{
         .title = "Title \"; echo hi",
         .artist = "Artist",
@@ -126,4 +138,28 @@ test "yt-dlp uses fixed output, MP3 bitrate and artwork; search stays a single a
     }
 
     try std.testing.expect(bitrate and cover and ffmpeg and size_limit);
+}
+
+test "yt-dlp keeps proxy credentials in one argument before the search separator" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const proxy = "socks5://user:password@proxy.example.com:1080/?value=a&other=b";
+    const provider = YtDlp.init("yt-dlp", "ffmpeg", proxy);
+    const argv = try provider.buildArguments(arena.allocator(), .{
+        .title = "Song",
+        .artist = "Artist",
+    }, 1024);
+
+    try std.testing.expectEqualStrings("--proxy", argv[argv.len - 4]);
+    try std.testing.expectEqualStrings(proxy, argv[argv.len - 3]);
+    try std.testing.expectEqualStrings("--", argv[argv.len - 2]);
+    try std.testing.expectEqualStrings("ytsearch5:Artist Song", argv[argv.len - 1]);
+
+    const direct = YtDlp.init("yt-dlp", "ffmpeg", null);
+    const direct_argv = try direct.buildArguments(arena.allocator(), .{
+        .title = "Song",
+        .artist = "Artist",
+    }, 1024);
+    for (direct_argv) |arg| try std.testing.expect(!std.mem.eql(u8, arg, "--proxy"));
 }

@@ -80,6 +80,10 @@ HTTPS reverse proxy. For local sign-in over HTTP, set `AUTH_COOKIE_SECURE=false`
 for HTTPS, keep it `true`. The external proxy must preserve the original `Host`
 and forward the entire site, including `/profile/` and `/api/`, to nginx.
 
+To download audio through a proxy, uncomment `YTDLP_PROXY` in `.env` and set
+an HTTP/HTTPS or SOCKS5 proxy URL reachable from the backend container.
+This setting applies to yt-dlp downloads for Web and Spotify.
+
 ### 2. Build the images and start storage services
 
 ```sh

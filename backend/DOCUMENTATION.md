@@ -234,6 +234,23 @@ SPOTIFY_TIMEOUT_SECONDS=900
 ```
 
 `FFMPEG_PATH` передаётся также в `--ffmpeg-location`; FFprobe должен находиться рядом.
+Необязательный `YTDLP_PROXY` передаётся отдельным аргументом `--proxy`:
+
+```dotenv
+YTDLP_PROXY=http://proxy.example.com:3128
+# Либо SOCKS5, при необходимости с авторизацией:
+# YTDLP_PROXY=socks5://user:password@proxy.example.com:1080
+```
+
+Настройка применяется к скачиваниям Web и Spotify, не меняя подключения
+PostgreSQL, S3 или каталога. Если значение отсутствует или пустое, аргумент
+`--proxy` не передаётся и остаётся стандартное поведение yt-dlp.
+В Docker адрес должен быть доступен из контейнера: `localhost` указывает
+на контейнер backend. Для proxy в той же Docker-сети используйте имя его сервиса;
+в Docker Desktop proxy на хосте можно указать через `host.docker.internal`.
+Изменив `.env`, пересоздайте backend командой `docker compose up -d backend`.
+При обновлении кода сначала выполните `docker compose up -d --build backend`.
+
 По умолчанию yt-dlp ищется в PATH, timeout — 900 секунд (1–3600), worker включён.
 Временный корень берётся из `IMPORTS_TMP_DIR` или `/tmp/musica-imports`.
 `TEMP` и `TMP` не используются; для Windows задайте подходящий абсолютный путь.

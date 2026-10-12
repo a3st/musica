@@ -44,6 +44,7 @@ pub fn main(init: std.process.Init) !void {
         .ffmpeg = FFmpeg.init(config.ffmpeg_path),
         .downloader = Downloader.init(.{
             .ytdlp_path = config.ytdlp_path,
+            .ytdlp_proxy = config.ytdlp_proxy,
             .ffmpeg_path = config.ffmpeg_path,
             .providers = &.{.yt_dlp},
         }),
