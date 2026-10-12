@@ -203,12 +203,15 @@ Musica — self-hosted музыкальный плеер. Репозиторий
   и `npm run test:web-ui`, для локализации — `npm run test:i18n`,
   для интерфейса — `npm run test:ui`, для прокси — `npm run test:proxy`,
   для production service worker — `npm run test:pwa`.
-- Backend: из `backend/` выполните `zig fmt --check build.zig src`, затем `zig build`.
-  Для логики backend запускайте также `zig build test`.
+- Backend: из `backend/` выполните `zig fmt --check build.zig src`, затем `python3 build.py`.
+  Для логики backend запускайте также `python3 build.py test`.
+  На Windows используйте `python` вместо `python3`. Обёртка хранит пакеты
+  в `backend/3rdparty/`, сохраняя URL и хеши в `build.zig.zon`;
+  не заменяйте зависимости локальными путями в манифесте.
   Не пересобирайте проект после каждой промежуточной правки: выполняйте
   необходимые проверки после завершения согласованной серии изменений.
   Для правок только документации сборка не требуется.
-- Для изменений HTTP запускайте `zig build run` и проверяйте затронутые маршруты.
+- Для изменений HTTP запускайте `python3 build.py run` и проверяйте затронутые маршруты.
   Начальный контракт: `GET /api/health` → `200`, JSON
   `{"status":"ok","service":"musica"}`; неизвестный маршрут → `404`.
 - Проверяйте production PWA через `npm run preview`: service worker по умолчанию

@@ -1,8 +1,11 @@
 *
 !Dockerfile
 !build.zig
+!build.py
 !build.zig.zon
 !src/
 !src/**
 !migrations/
 !migrations/**
+!3rdparty/
+!3rdparty/**

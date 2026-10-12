@@ -10,6 +10,7 @@ import hmac
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -228,7 +229,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
         custom_job = execute_sql("INSERT INTO public.jobs (kind,payload) VALUES ('custom_fixture','{\"arbitrary\":[1,true,\"value\"]}') RETURNING id::text").splitlines()[0]
 
         if not backend_image:
-            subprocess.run(["zig", "build", "-Doptimize=" + optimize], cwd=BACKEND, check=True)
+            subprocess.run([sys.executable, str(BACKEND / "build.py"), "-Doptimize=" + optimize], cwd=BACKEND, check=True)
         http_port = available_port()
         env.update(
             HTTP_HOST="127.0.0.1",
@@ -915,7 +916,7 @@ def run_api_checks(optimize="Debug", backend_image=None):
         print('PASS: expired processing cleanup is reclaimed and all 43 objects are deleted.')
         print('PASS: cookie sessions, CSRF, playlist listing, cover reads, unlink versus global delete, durable S3 cleanup and retries.')
         if not backend_image:
-            subprocess.run(['zig', 'build', 'test-download-fixture'], cwd=BACKEND, check=True)
+            subprocess.run([sys.executable, str(BACKEND / 'build.py'), 'test-download-fixture'], cwd=BACKEND, check=True)
             from spotify_integration import check_spotify_import
             check_spotify_import(api_request, execute_sql, env, executable, BACKEND)
 

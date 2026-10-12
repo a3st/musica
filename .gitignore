@@ -15,6 +15,7 @@ __pycache__/
 zig-cache/
 zig-out/
 zig-pkg/
+/backend/3rdparty/
 
 # Local configuration and secrets
 .env

@@ -44,16 +44,12 @@ fn remove(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 
 test "profile endpoints reject anonymous requests before reading passwords or acquiring a connection" {
     var app: App = undefined;
-    var context = httpz.testing.init(.{});
-    defer context.deinit();
+    inline for (.{ read, changePassword, remove }) |handler| {
+        var context = httpz.testing.init(.{});
+        defer context.deinit();
 
-    try read(&app, context.req, context.res);
-    try context.expectStatus(401);
-
-    try changePassword(&app, context.req, context.res);
-    try context.expectStatus(401);
-    try context.expectJson(.{ .@"error" = "unauthorized" });
-
-    try remove(&app, context.req, context.res);
-    try context.expectStatus(401);
+        try handler(&app, context.req, context.res);
+        try context.expectStatus(401);
+        try context.expectJson(.{ .@"error" = "unauthorized" });
+    }
 }

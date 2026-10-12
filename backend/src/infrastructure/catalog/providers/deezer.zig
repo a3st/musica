@@ -77,6 +77,7 @@ pub const DeezerClient = struct {
 
         switch (try select.await()) {
             .response => |result| result catch |err| {
+                if (err == error.Canceled) return err;
                 std.log.err("Deezer request failed: {s}", .{@errorName(err)});
                 return error.CatalogUnavailable;
             },
@@ -111,7 +112,7 @@ pub const DeezerClient = struct {
             .writer = writer,
         };
 
-        try retry.run(self.client.io, .{}, &context, FetchContext.beforeAttempt, FetchContext.perform, shouldRetry);
+        try retry.run(self.client.io, .{}, &context, FetchContext.beforeAttempt, FetchContext.perform, retry.isTransientHttpError);
     }
 
     /// Выполняет GET по фиксированному адресу провайдера; адрес клиента не принимается извне.
@@ -129,25 +130,6 @@ pub const DeezerClient = struct {
         }
     }
 };
-
-/// Повторяет только сетевые сбои; отмена, HTTP-ошибки и переполнение буфера завершают вызов.
-fn shouldRetry(err: anyerror) bool {
-    return switch (err) {
-        error.HttpConnectionClosing,
-        error.HttpRequestTruncated,
-        error.HttpChunkTruncated,
-        error.ConnectionResetByPeer,
-        error.ConnectionRefused,
-        error.ConnectionTimedOut,
-        error.Timeout,
-        error.BrokenPipe,
-        error.NetworkUnreachable,
-        error.HostUnreachable,
-        error.ReadFailed,
-        => true,
-        else => false,
-    };
-}
 
 /// Завершает ожидание внешнего каталога через двадцать секунд.
 fn deadline(io: std.Io) !void {

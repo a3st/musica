@@ -150,7 +150,7 @@ After building the nginx image, check its routes with
 | Component | Requirement |
 | --- | --- |
 | Player and profile | Node.js 22.12+ and npm |
-| Backend | Zig **0.16.0**, PostgreSQL 14+, and MinIO |
+| Backend | Zig **0.16.0**, Python 3.10+, PostgreSQL 14+, and MinIO |
 | Audio processing | FFmpeg and ffprobe |
 | Audio downloads | yt-dlp and Node.js 22+ |
 
@@ -165,7 +165,7 @@ Then start each subproject in a separate terminal:
 
 | Subproject | Directory | Commands | Address |
 | --- | --- | --- | --- |
-| Backend | `backend/` | `zig build run` | `http://localhost:8080/api/` |
+| Backend | `backend/` | `python3 build.py run` | `http://localhost:8080/api/` |
 | Player | `frontend-app/` | `npm ci`, then `npm run dev` | `http://localhost:5173/` |
 | Profile | `frontend-admin/` | `npm ci`, then `npm run dev` | `http://localhost:5174/profile/` |
 
@@ -187,11 +187,15 @@ For the backend, run these commands from `backend/`:
 
 ```sh
 zig fmt --check build.zig src
-zig build test
-zig build -Doptimize=ReleaseSafe
+python3 build.py test
+python3 build.py -Doptimize=ReleaseSafe
 ```
 
 Backend build output is written to `backend/zig-out/bin/`.
+The wrapper downloads missing dependencies into `backend/3rdparty/`, then
+builds from that package cache without fetching. Compilation caches stay separate.
+On Windows, use `python` instead of `python3`. To prepare packages without
+building, run `python3 build.py --deps-only`.
 Do not run migrations or integration tests against your production database.
 
 ## Project structure

@@ -59,16 +59,12 @@ fn cleanupOrphaned(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
 
 test "admin endpoints reject anonymous requests before touching storage or database" {
     var app: App = undefined;
-    var context = httpz.testing.init(.{});
-    defer context.deinit();
+    inline for (.{ readStorage, listUsers, cleanupOrphaned }) |handler| {
+        var context = httpz.testing.init(.{});
+        defer context.deinit();
 
-    try readStorage(&app, context.req, context.res);
-    try context.expectStatus(401);
-    try context.expectJson(.{ .@"error" = "unauthorized" });
-
-    try listUsers(&app, context.req, context.res);
-    try context.expectStatus(401);
-
-    try cleanupOrphaned(&app, context.req, context.res);
-    try context.expectStatus(401);
+        try handler(&app, context.req, context.res);
+        try context.expectStatus(401);
+        try context.expectJson(.{ .@"error" = "unauthorized" });
+    }
 }

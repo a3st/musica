@@ -533,7 +533,7 @@ $env:DB_USER = 'musica'
 $env:DB_PASSWORD = 'ваш-пароль-БД'
 $env:S3_ACCESS_KEY_ID = 'ваш-access-key'
 $env:S3_SECRET_ACCESS_KEY = 'ваш-secret-key'
-zig build run
+python build.py run
 ```
 
 Backend подключает пул из четырёх соединений PostgreSQL при запуске.
@@ -966,12 +966,12 @@ PostgreSQL и MinIO не опубликованы: включите нужные
 В панели Run and Debug выберите **Backend: debug (Windows)**, поставьте
 breakpoint в `src/main.zig` или обработчике маршрута и нажмите **F5**.
 Перед запуском задача **Backend: build Debug** выполняет
-`zig build -Doptimize=Debug --prefix zig-out/debug`. EXE и PDB находятся
+`python3 build.py -Doptimize=Debug --prefix zig-out/debug`. EXE и PDB находятся
 в `backend/zig-out/debug/bin/`; отладчик запускает EXE напрямую.
 Для breakpoint в HTTP-обработчике отправьте соответствующий запрос к API.
 
 Настройки из `backend/.env` загружает отладчик VS Code через `envFile`;
-обычный `zig build run` по-прежнему наследует окружение процесса.
+обычный `python3 build.py run` по-прежнему наследует окружение процесса.
 Файл с секретами исключён из Git. Если порт backend занят другим процессом
 или контейнером, остановите его либо задайте другой `HTTP_PORT` в `backend/.env`.
 **Shift+F5** останавливает отлаживаемый backend.
@@ -980,7 +980,62 @@ breakpoint в `src/main.zig` или обработчике маршрута и �
 
 ## Сборка для ARM64 и x86-64
 
-Обычный `zig build` использует текущую платформу и архитектуру. При указании
+### Локальный кеш зависимостей
+
+Для сборки используйте `python3 build.py` из `backend/`; в Windows — `python build.py`.
+Требуется Python 3.10+. Обёртка сначала проверяет дерево через `--fetch=all --system`.
+Если пакетов не хватает, запускает `zig build --fetch=all` с кешем
+`backend/.zig-cache/downloads`, сохраняет распакованные пакеты в `3rdparty`, затем
+передаёт шаги и параметры в `zig build --system 3rdparty`.
+URL и хеши прямых и транзитивных зависимостей проверяются штатным загрузчиком Zig.
+Уже подготовленные пакеты используются повторно; при смене хеша скачивается новый пакет.
+Исходники пакетов находятся в `3rdparty/`, кеш компиляции — в `.zig-cache/`
+и стандартном глобальном кеше Zig. `3rdparty/` исключён из Git.
+При скачивании Zig временно распаковывает пакеты также в `zig-pkg/`;
+для повторной сборки используется `3rdparty/` без обращения к сети.
+Архивы скачивания находятся в `.zig-cache/downloads/p/`.
+Старый локальный кеш сохранён в `.zig-cache/previous-packages/` и не участвует в сборке.
+
+Только подготовить зависимости, без компиляции:
+
+```sh
+python3 build.py --deps-only
+python3 tests/build_wrapper_test.py
+```
+
+Задачи VS Code используют обёртку. Перед первым запуском через панель Testing
+выполните `Backend: fetch dependencies`: сама панель использует
+`--system backend/3rdparty` и не скачивает пакеты.
+Docker сохраняет `3rdparty` и кеш скачивания в отдельных BuildKit cache mounts между сборками;
+также сохраняется кеш компиляции отдельно для amd64 и arm64.
+Если на хосте уже подготовлен `backend/3rdparty`, Docker использует эти пакеты
+для заполнения своего кеша. Они передаются только в build-stage, не в runtime-образ.
+При полном дереве зависимости не скачиваются, даже если BuildKit-кеш пуст.
+Без локальных пакетов или при неполном дереве недостающие зависимости скачиваются.
+
+Если GitHub или Codeberg доступны только через VPN, подготовьте пакеты на хосте
+с включённым VPN из корня проекта, затем повторите сборку:
+
+```sh
+python3 backend/build.py --deps-only
+docker compose --progress plain build backend
+```
+
+На Windows вместо `python3` используйте `python`. В логе сообщение
+`Using dependencies from 3rdparty; no package download needed` подтверждает,
+что скачивание Zig-пакетов не требуется. После него выполняется компиляция
+и тесты, которые при первой сборке могут занимать время.
+Тесты и ReleaseSafe-сборка выполняются в отдельных шагах Docker с подробным
+выводом команд Zig. Выполнение тестового процесса ограничено 120 секундами;
+это ограничение не распространяется на время компиляции.
+Это не полностью офлайн-сборка: базовые образы, архив Zig, пакеты apt и yt-dlp
+по-прежнему требуют сети при отсутствии Docker-кеша. `YTDLP_PROXY` применяется
+к работе yt-dlp после запуска сервиса, а не к скачиваниям во время сборки.
+Прямой `zig build` без обёртки использует обычный кеш Zig.
+
+### Цели сборки
+
+Обычный `python3 build.py` использует текущую платформу и архитектуру. При указании
 `-Dtarget` используется выбранная платформа. Обычная сборка и отдельные цели
 Linux/Windows переиспользуют общую логику создания и установки backend.
 Результат обычной сборки — `zig-out/bin/musica-backend` на Linux и
@@ -989,10 +1044,10 @@ Linux/Windows переиспользуют общую логику создан�
 Из `backend/` доступны отдельные цели сборки для Linux и Windows:
 
 ```sh
-zig build build-arm64 -Doptimize=ReleaseSafe
-zig build build-x86-64 -Doptimize=ReleaseSafe
-zig build build-windows-arm64 -Doptimize=ReleaseSafe
-zig build build-windows-x86-64 -Doptimize=ReleaseSafe
+python3 build.py build-arm64 -Doptimize=ReleaseSafe
+python3 build.py build-x86-64 -Doptimize=ReleaseSafe
+python3 build.py build-windows-arm64 -Doptimize=ReleaseSafe
+python3 build.py build-windows-x86-64 -Doptimize=ReleaseSafe
 ```
 
 | Цель | Платформа | Бинарник |
@@ -1012,7 +1067,7 @@ zig build build-windows-x86-64 -Doptimize=ReleaseSafe
 Для другой платформы или версии libc используйте стандартный параметр Zig:
 
 ```sh
-zig build -Dtarget=aarch64-linux-gnu.2.36 -Doptimize=ReleaseSafe --prefix zig-out/linux-arm64
+python3 build.py -Dtarget=aarch64-linux-gnu.2.36 -Doptimize=ReleaseSafe --prefix zig-out/linux-arm64
 ```
 
 В этом случае результат — `zig-out/linux-arm64/bin/musica-backend`.
@@ -1027,19 +1082,19 @@ zig build -Dtarget=aarch64-linux-gnu.2.36 -Doptimize=ReleaseSafe --prefix zig-ou
 
 ```sh
 zig fmt --check build.zig src
-zig build
-zig build test --summary all
-zig build test -Dtest-filter="HLS publication" --summary all
-zig build test -Doptimize=ReleaseSafe --summary all
-zig build -Doptimize=ReleaseSafe
+python3 build.py
+python3 build.py test --summary all
+python3 build.py test -Dtest-filter="HLS publication" --summary all
+python3 build.py test -Doptimize=ReleaseSafe --summary all
+python3 build.py -Doptimize=ReleaseSafe
 ```
 
 При открытом корне репозитория панель VS Code **Testing → Run Test** использует
 `.vscode/settings.json`: `zig build test --build-file backend/build.zig
--Dtest-filter=<имя теста>`. Прямой `zig test <файл>` не подключает модули из
+--system backend/3rdparty -Dtest-filter=<имя теста>`. Прямой `zig test <файл>` не подключает модули из
 build.zig и может запрещать относительные импорты за пределами каталога файла.
 Расширение показывает тесты открытых Zig-файлов; для полного набора используйте
-задачу `Backend: test` либо команду `zig build test --summary all`.
+задачу `Backend: test` либо команду `python3 build.py test --summary all`.
 
 Тесты проверяют валидацию и HTTP-ошибки, UTC-даты, подпись SigV4 на фиксированном
 независимом примере, бинарный PUT, отказ хранилища и отмену зависшего запроса
@@ -1097,8 +1152,15 @@ Keep-alive отключён для GET, PUT и DELETE: запросы отпра
 с задержками 200 и 500 мс и случайной добавкой до 50 мс. Клиент не пересоздаётся;
 keep-alive у iTunes и Deezer остаётся включённым. Callback `beforeAttempt` вызывается
 перед каждой попыткой и очищает буфер GET, чтобы частичные ответы не смешивались.
+Все три HTTP-клиента используют единый список `retry.isTransientHttpError`:
+закрытие соединения, обрыв HTTP-ответа и конкретные сетевые ошибки.
+Общие `ReadFailed` и `WriteFailed` не повторяются: они могут скрывать отмену
+или ошибку буфера, а не временный сетевой сбой.
 Отмена, HTTP-ошибки и переполнение буфера не повторяются. Общий таймаут операции
 не продлевается и включает задержки; отложенные повторы jobs остаются отдельным уровнем.
+Явный `Canceled` в iTunes и Deezer передаётся вызывающему коду без замены на
+`CatalogUnavailable`. Причина, скрытая за общей ошибкой reader/writer,
+не восстанавливается; такой сбой завершает текущую операцию без повтора.
 В Debug для PUT/DELETE логируется этап ошибки: соединение, отправка тела,
 ожидание заголовков или чтение ответа. Ошибки загрузки трека содержат ID трека
 и попытки загрузки для сопоставления с задачами.

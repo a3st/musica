@@ -3,7 +3,7 @@ FROM debian:bookworm-slim AS build
 
 ARG TARGETARCH
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Official Zig 0.16.0 archives; verify SHA-256 before extracting.
@@ -19,12 +19,29 @@ RUN set -eu; \
     tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1; \
     rm /tmp/zig.tar.xz
 
-ENV PATH="/opt/zig:${PATH}"
+ENV PATH="/opt/zig:${PATH}" ZIG_GLOBAL_CACHE_DIR=/app/.zig-cache/global
 WORKDIR /app
-COPY build.zig build.zig.zon ./
+COPY build.py build.zig build.zig.zon ./
+RUN --mount=type=cache,id=musica-zig-sources,target=/app/3rdparty,sharing=locked \
+    --mount=type=cache,id=musica-zig-downloads,target=/app/.zig-cache/downloads,sharing=locked \
+    --mount=type=bind,source=.,target=/build-context,readonly \
+    if [ -d /build-context/3rdparty ]; then cp -a /build-context/3rdparty/. /app/3rdparty/; fi \
+    && python3 build.py --deps-only
 COPY src/ ./src/
 COPY migrations/ ./migrations/
-RUN zig build test && zig build -Doptimize=ReleaseSafe
+RUN --mount=type=cache,id=musica-zig-sources,target=/app/3rdparty,sharing=locked \
+    --mount=type=cache,id=musica-zig-build-${TARGETARCH},target=/app/.zig-cache,sharing=locked \
+    --mount=type=cache,id=musica-zig-downloads,target=/app/.zig-cache/downloads,sharing=locked \
+    --mount=type=bind,source=.,target=/build-context,readonly \
+    if [ -d /build-context/3rdparty ]; then cp -a /build-context/3rdparty/. /app/3rdparty/; fi \
+    && python3 build.py test --test-timeout 120s --summary all --verbose
+
+RUN --mount=type=cache,id=musica-zig-sources,target=/app/3rdparty,sharing=locked \
+    --mount=type=cache,id=musica-zig-build-${TARGETARCH},target=/app/.zig-cache,sharing=locked \
+    --mount=type=cache,id=musica-zig-downloads,target=/app/.zig-cache/downloads,sharing=locked \
+    --mount=type=bind,source=.,target=/build-context,readonly \
+    if [ -d /build-context/3rdparty ]; then cp -a /build-context/3rdparty/. /app/3rdparty/; fi \
+    && python3 build.py -Doptimize=ReleaseSafe --summary all --verbose
 
 FROM node:22-bookworm-slim AS javascript
 

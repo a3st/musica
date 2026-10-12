@@ -150,7 +150,7 @@ docker compose down
 | Компонент | Требование |
 | --- | --- |
 | Плеер и профиль | Node.js 22.12+ и npm |
-| Backend | Zig **0.16.0**, PostgreSQL 14+ и MinIO |
+| Backend | Zig **0.16.0**, Python 3.10+, PostgreSQL 14+ и MinIO |
 | Обработка аудио | FFmpeg и ffprobe |
 | Скачивание аудио | yt-dlp и Node.js 22+ |
 
@@ -165,7 +165,7 @@ HTTP-сервер использует [http.zig](https://github.com/karlseguin/
 
 | Подпроект | Каталог | Команды | Адрес |
 | --- | --- | --- | --- |
-| Backend | `backend/` | `zig build run` | `http://localhost:8080/api/` |
+| Backend | `backend/` | `python3 build.py run` | `http://localhost:8080/api/` |
 | Плеер | `frontend-app/` | `npm ci`, затем `npm run dev` | `http://localhost:5173/` |
 | Профиль | `frontend-admin/` | `npm ci`, затем `npm run dev` | `http://localhost:5174/profile/` |
 
@@ -187,11 +187,15 @@ Vite проксирует `/api/` на backend. Открывайте оба ин
 
 ```sh
 zig fmt --check build.zig src
-zig build test
-zig build -Doptimize=ReleaseSafe
+python3 build.py test
+python3 build.py -Doptimize=ReleaseSafe
 ```
 
 Результат сборки backend находится в `backend/zig-out/bin/`.
+Обёртка скачивает недостающие зависимости в `backend/3rdparty/`, затем
+собирает из этого каталога без скачивания. Кеши компиляции остаются отдельно.
+В Windows используйте `python` вместо `python3`. Для подготовки пакетов без
+сборки выполните `python3 build.py --deps-only`.
 Миграции и интеграционные тесты не следует выполнять на рабочей БД.
 
 ## Структура проекта

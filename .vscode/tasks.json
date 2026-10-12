@@ -2,10 +2,31 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Backend: fetch dependencies",
+      "type": "process",
+      "command": "python3",
+      "windows": {
+        "command": "python"
+      },
+      "args": [
+        "build.py",
+        "--deps-only"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/backend"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Backend: test",
       "type": "process",
-      "command": "zig",
-      "args": ["build", "test", "--summary", "all"],
+      "command": "python3",
+      "args": [
+        "build.py",
+        "test",
+        "--summary",
+        "all"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
       },
@@ -17,13 +38,21 @@
       "presentation": {
         "panel": "dedicated",
         "clear": true
+      },
+      "windows": {
+        "command": "python"
       }
     },
     {
       "label": "Backend: build Debug",
       "type": "process",
-      "command": "zig",
-      "args": ["build", "-Doptimize=Debug", "--prefix", "zig-out/debug"],
+      "command": "python3",
+      "args": [
+        "build.py",
+        "-Doptimize=Debug",
+        "--prefix",
+        "zig-out/debug"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
       },
@@ -32,13 +61,18 @@
       "presentation": {
         "panel": "dedicated",
         "clear": true
+      },
+      "windows": {
+        "command": "python"
       }
     },
     {
       "label": "Backend: build",
       "type": "shell",
-      "command": "zig",
-      "args": ["build"],
+      "command": "python3",
+      "args": [
+        "build.py"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
       },
@@ -47,13 +81,19 @@
       "presentation": {
         "panel": "dedicated",
         "clear": true
+      },
+      "windows": {
+        "command": "python"
       }
     },
     {
       "label": "Backend: build ReleaseSafe",
       "type": "shell",
-      "command": "zig",
-      "args": ["build", "-Doptimize=ReleaseSafe"],
+      "command": "python3",
+      "args": [
+        "build.py",
+        "-Doptimize=ReleaseSafe"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
       },
@@ -62,13 +102,19 @@
       "presentation": {
         "panel": "dedicated",
         "clear": true
+      },
+      "windows": {
+        "command": "python"
       }
     },
     {
       "label": "Backend: run",
       "type": "shell",
-      "command": "zig",
-      "args": ["build", "run"],
+      "command": "python3",
+      "args": [
+        "build.py",
+        "run"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/backend"
       },
@@ -81,6 +127,9 @@
         "panel": "dedicated",
         "group": "musica-dev",
         "reveal": "always"
+      },
+      "windows": {
+        "command": "python"
       }
     },
     {
@@ -90,7 +139,9 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["ci"],
+      "args": [
+        "ci"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-app"
       },
@@ -106,7 +157,10 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["run", "build"],
+      "args": [
+        "run",
+        "build"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-app"
       },
@@ -124,7 +178,10 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["run", "dev"],
+      "args": [
+        "run",
+        "dev"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-app"
       },
@@ -146,7 +203,9 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["ci"],
+      "args": [
+        "ci"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-admin"
       },
@@ -162,7 +221,10 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["run", "build"],
+      "args": [
+        "run",
+        "build"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-admin"
       },
@@ -180,7 +242,10 @@
       "windows": {
         "command": "npm.cmd"
       },
-      "args": ["run", "dev"],
+      "args": [
+        "run",
+        "dev"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/frontend-admin"
       },
@@ -211,7 +276,11 @@
     },
     {
       "label": "Run: all",
-      "dependsOn": ["Backend: run", "Frontend app: run", "Frontend admin: run"],
+      "dependsOn": [
+        "Backend: run",
+        "Frontend app: run",
+        "Frontend admin: run"
+      ],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }

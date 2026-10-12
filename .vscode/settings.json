@@ -4,6 +4,8 @@
     "test",
     "--build-file",
     "backend/build.zig",
+    "--system",
+    "backend/3rdparty",
     "-Dtest-filter=${filter}",
     "--summary",
     "all"

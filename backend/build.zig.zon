@@ -13,5 +13,5 @@
             .hash = "pg-0.0.0-Wp_7gTEVBwB8CsFe-rh8enfPHKrfA3oapKLIRoPbKUDx",
         },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "src", "migrations", "tests" },
+    .paths = .{ "build.py", "build.zig", "build.zig.zon", "src", "migrations", "tests" },
 }

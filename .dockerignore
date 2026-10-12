@@ -14,6 +14,7 @@
 **/.zig-cache
 **/zig-out
 **/zig-pkg
+**/3rdparty
 **/.venv
 **/__pycache__
 **/.env

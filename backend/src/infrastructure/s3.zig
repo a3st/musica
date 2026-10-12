@@ -238,7 +238,7 @@ pub const S3 = struct {
             .writer = writer,
         };
 
-        try retry.run(self.io, .{}, &context, GetContext.beforeAttempt, GetContext.perform, shouldRetryGet);
+        try retry.run(self.io, .{}, &context, GetContext.beforeAttempt, GetContext.perform, retry.isTransientHttpError);
     }
 
     /// Выполняет GET через общий клиент без keep-alive и перехода по редиректам.
@@ -315,7 +315,7 @@ pub const S3 = struct {
             .method = method,
         };
 
-        try retry.run(self.io, .{}, &context, SendContext.beforeAttempt, SendContext.perform, shouldRetrySend);
+        try retry.run(self.io, .{}, &context, SendContext.beforeAttempt, SendContext.perform, retry.isTransientHttpError);
     }
 
     /// Выполняет одну отправку, освобождает запрос и проверяет HTTP-статус без перехода по редиректам.
@@ -394,30 +394,6 @@ pub const S3 = struct {
         }
     }
 };
-
-/// Повторяет сетевые сбои GET; WriteFailed может означать переполнение буфера и не повторяется.
-fn shouldRetryGet(err: anyerror) bool {
-    return switch (err) {
-        error.HttpConnectionClosing,
-        error.HttpRequestTruncated,
-        error.HttpChunkTruncated,
-        error.ConnectionResetByPeer,
-        error.ConnectionRefused,
-        error.ConnectionTimedOut,
-        error.Timeout,
-        error.BrokenPipe,
-        error.NetworkUnreachable,
-        error.HostUnreachable,
-        error.ReadFailed,
-        => true,
-        else => false,
-    };
-}
-
-/// Для отправки тела WriteFailed также считается временной сетевой ошибкой.
-fn shouldRetrySend(err: anyerror) bool {
-    return err == error.WriteFailed or shouldRetryGet(err);
-}
 
 /// Проверяет допустимое имя бакета для файловых операций; иначе InvalidBucket.
 fn validateBucket(bucket: []const u8) !void {
@@ -665,26 +641,30 @@ test "stalled S3 request is canceled at its deadline" {
     try recovery.await(io);
 }
 
-/// Тестовый сервер: обслуживает PUT, GET, DELETE и повторный GET на одном соединении.
-fn persistentStorage(io: std.Io, server: *std.Io.net.Server) !void {
-    const stream = try server.accept(io);
-    defer stream.close(io);
-    var read_buffer: [4096]u8 = undefined;
-    var reader = stream.reader(io, &read_buffer);
-    var write_buffer: [256]u8 = undefined;
-    var writer = stream.writer(io, &write_buffer);
+/// Тестовый сервер: обслуживает PUT, GET, DELETE и повторный GET на отдельных соединениях.
+fn sequentialStorage(io: std.Io, server: *std.Io.net.Server) !void {
     for ([_][]const u8{
         "PUT /historical-uploads/tracks/test HTTP/1.1\r",
         "GET /uploads/tracks/test HTTP/1.1\r",
         "DELETE /historical-uploads/tracks/test HTTP/1.1\r",
         "GET /uploads/tracks/test HTTP/1.1\r",
     }, 0..) |expected, index| {
+        const stream = try server.accept(io);
+        defer stream.close(io);
+        var read_buffer: [4096]u8 = undefined;
+        var reader = stream.reader(io, &read_buffer);
+        var write_buffer: [256]u8 = undefined;
+        var writer = stream.writer(io, &write_buffer);
+
         try std.testing.expectEqualStrings(expected, (try reader.interface.takeDelimiter('\n')) orelse return error.EndOfStream);
+        var connection_close = false;
         while (true) {
             const line = (try reader.interface.takeDelimiter('\n')) orelse return error.EndOfStream;
             if (std.mem.eql(u8, line, "\r")) break;
-            try std.testing.expect(!std.mem.eql(u8, line, "connection: close\r"));
+            if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, line, " \t\r"), "connection: close"))
+                connection_close = true;
         }
+        try std.testing.expect(connection_close);
         if (index == 0) {
             var payload: [4]u8 = undefined;
             try reader.interface.readSliceAll(&payload);
@@ -693,7 +673,7 @@ fn persistentStorage(io: std.Io, server: *std.Io.net.Server) !void {
         if (index == 1 or index == 3) {
             try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\ntest");
         } else if (index == 2) {
-            // MinIO sends a bodyless 204 without Content-Length and keeps the connection open.
+            // A bodyless 204 does not require Content-Length.
             try writer.interface.writeAll("HTTP/1.1 204 No Content\r\n\r\n");
         } else {
             try writer.interface.writeAll("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
@@ -702,12 +682,12 @@ fn persistentStorage(io: std.Io, server: *std.Io.net.Server) !void {
     }
 }
 
-test "S3 treats 204 without Content-Length as bodyless and reuses the connection" {
+test "S3 treats 204 without Content-Length as bodyless with separate connections" {
     const io = std.testing.io;
     const address: std.Io.net.IpAddress = .{ .ip4 = .{ .bytes = .{ 127, 0, 0, 1 }, .port = 0 } };
     var server = try address.listen(io, .{});
     defer server.deinit(io);
-    var future = try io.concurrent(persistentStorage, .{ io, &server });
+    var future = try io.concurrent(sequentialStorage, .{ io, &server });
     defer future.cancel(io) catch {};
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

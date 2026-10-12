@@ -1,5 +1,23 @@
 const std = @import("std");
 
+/// Разрешает повторы конкретных сетевых сбоев HTTP; общие ошибки reader/writer не повторяет.
+pub fn isTransientHttpError(err: anyerror) bool {
+    return switch (err) {
+        error.HttpConnectionClosing,
+        error.HttpRequestTruncated,
+        error.HttpChunkTruncated,
+        error.ConnectionResetByPeer,
+        error.ConnectionRefused,
+        error.ConnectionTimedOut,
+        error.Timeout,
+        error.BrokenPipe,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        => true,
+        else => false,
+    };
+}
+
 /// Ограничивает число попыток и задержки; общий таймаут задаёт вызывающий код.
 pub const Policy = struct {
     /// Включает первую попытку, а не только повторы.
@@ -84,6 +102,48 @@ const Fixture = struct {
         return err == error.ConnectionResetByPeer or err == error.Canceled;
     }
 };
+
+test "HTTP retry stops on ambiguous IO errors, cancellation and non-network failures" {
+    var buffer: [32]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buffer);
+
+    for ([_]anyerror{
+        error.ReadFailed,
+        error.WriteFailed,
+        error.Canceled,
+        error.CatalogUnavailable,
+        error.StorageRejected,
+        error.OutOfMemory,
+    }) |err| {
+        var fixture: Fixture = .{ .writer = &writer, .failure = err };
+        try std.testing.expectError(err, run(
+            std.testing.io,
+            .{ .delays_ms = &.{0}, .jitter_ms = 0 },
+            &fixture,
+            Fixture.prepare,
+            Fixture.perform,
+            isTransientHttpError,
+        ));
+        try std.testing.expectEqual(@as(u8, 1), fixture.attempts);
+    }
+}
+
+test "HTTP retry recovers a connection reset and clears partial response data" {
+    var buffer: [32]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&buffer);
+    var fixture: Fixture = .{ .writer = &writer, .failures = 2 };
+
+    try run(
+        std.testing.io,
+        .{ .delays_ms = &.{0}, .jitter_ms = 0 },
+        &fixture,
+        Fixture.prepare,
+        Fixture.perform,
+        isTransientHttpError,
+    );
+    try std.testing.expectEqual(@as(u8, 3), fixture.attempts);
+    try std.testing.expectEqualStrings("complete", writer.buffered());
+}
 
 test "retry resets partial output before each attempt and stops after success" {
     var buffer: [32]u8 = undefined;
