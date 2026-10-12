@@ -184,9 +184,13 @@ try {
   preparationReads = 0;
   await page.locator('#search').focus();
   const add = page.locator('.search-result-add');
+  assert.equal(await add.locator('circle').count(), 1, 'addition uses a circular icon');
+  assert.equal(await add.locator('circle').getAttribute('fill'), null, 'not added: circle is outlined');
   await add.click();
   await page.locator('#search-results').getByRole('button', { name: 'Добавлено', exact: true }).waitFor();
   assert.equal(await add.isDisabled(), true);
+  assert.equal(await add.locator('circle').getAttribute('fill'), 'currentColor', 'added: circle is filled');
+  assert.equal(await add.evaluate(element => getComputedStyle(element).opacity), '1', 'added icon remains visible');
   assert.equal(additions, 1);
   await page.locator('.search-result-more').click();
   await page.locator('#context-menu').getByRole('menuitem').last().click();
@@ -203,6 +207,10 @@ try {
   await page.locator('#search').press('Escape');
   await page.locator('#search-results').waitFor({ state: 'detached' });
   await page.locator('.track-row').waitFor();
+  const headingSizes = await page.locator('.track-table-heading > span').evaluateAll(elements =>
+    elements.filter(element => element.textContent.trim() && getComputedStyle(element).display !== 'none')
+      .map(element => getComputedStyle(element).fontSize));
+  assert.equal(new Set(headingSizes).size, 1, 'visible column headings use the same font size');
   console.log('PASS: explicit addition and source menu.');
   assert.match(await page.locator('.track-row').textContent(), /Live Remix/);
 

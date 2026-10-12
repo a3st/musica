@@ -111,8 +111,6 @@
     play={(track) => app.play(track)}
     menu={(track, origin, point) => app.showTrackMenu(track, origin, point)}
     search={app.library.search}
-    writable={app.library.writable(playlist.id)}
-    upload={() => app.upload()}
   />
 </div>
 
@@ -163,7 +161,7 @@
   }
 
   .playlist-page :global(.track-table-heading) {
-    font-size: 12px;
+    --heading-font-size: 12px;
     letter-spacing: 0;
     color: var(--muted);
   }

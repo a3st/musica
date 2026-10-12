@@ -23,7 +23,7 @@ services:
       start_period: 10s
 
   minio:
-    image: musica-minio:0.4.1
+    image: musica-minio:0.4.3
     build:
       context: ./docker/minio
     restart: unless-stopped
@@ -46,7 +46,7 @@ services:
       start_period: 10s
 
   minio-init:
-    image: musica-minio:0.4.1
+    image: musica-minio:0.4.3
     pull_policy: never
     restart: on-failure
     entrypoint: ["/bin/sh", "-ec"]
@@ -63,7 +63,7 @@ services:
         condition: service_healthy
 
   backend:
-    image: musica-backend:0.4.1
+    image: musica-backend:0.4.3
     build:
       context: ./backend
     restart: unless-stopped
@@ -106,7 +106,7 @@ services:
         condition: service_completed_successfully
 
   nginx:
-    image: musica-frontend:0.4.1
+    image: musica-frontend:0.4.3
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile

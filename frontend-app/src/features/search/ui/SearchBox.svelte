@@ -284,6 +284,7 @@
                 >
                 <button
                   class="icon-button search-result-add"
+                  class:added={controller.web.additions[searchTrackKey(result.track)] === 'added'}
                   disabled={!importsEnabled ||
                     !!controller.web.additions[searchTrackKey(result.track)]}
                   aria-label={controller.web.additions[searchTrackKey(result.track)] === 'added'
@@ -300,8 +301,8 @@
                     ></span>
                   {:else}<Icon
                       name={controller.web.additions[searchTrackKey(result.track)] === 'added'
-                        ? 'check'
-                        : 'plus'}
+                        ? 'library-added'
+                        : 'library-add'}
                     />{/if}
                 </button>
               {:else if result.kind === 'service'}
@@ -315,6 +316,7 @@
                 >
                 <button
                   class="icon-button search-result-add"
+                  class:added={controller.serviceAdditions[result.track.id] === 'added'}
                   disabled={!!controller.serviceAdditions[result.track.id]}
                   aria-label={controller.serviceAdditions[result.track.id] === 'added'
                     ? language.t('web.added')
@@ -326,8 +328,8 @@
                   {:else}
                     <Icon
                       name={controller.serviceAdditions[result.track.id] === 'added'
-                        ? 'check'
-                        : 'plus'}
+                        ? 'library-added'
+                        : 'library-add'}
                     />
                   {/if}
                 </button>

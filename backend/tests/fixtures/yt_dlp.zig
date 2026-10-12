@@ -22,7 +22,6 @@ fn validateArguments(args: []const []const u8) !void {
 
     var bitrate = false;
     var thumbnail = false;
-    var ffmpeg = false;
     var output = false;
     for (args, 0..) |arg, i| {
         if (std.mem.eql(u8, arg, "--audio-quality") or
@@ -34,12 +33,13 @@ fn validateArguments(args: []const []const u8) !void {
 
         if (std.mem.eql(u8, arg, "--audio-quality")) bitrate = std.mem.eql(u8, args[i + 1], "256K");
         if (std.mem.eql(u8, arg, "--embed-thumbnail")) thumbnail = true;
-        if (std.mem.eql(u8, arg, "--ffmpeg-location")) ffmpeg = args[i + 1].len > 0;
+        if (std.mem.eql(u8, arg, "--ffmpeg-location") and args[i + 1].len == 0)
+            return error.InvalidArguments;
         if (std.mem.eql(u8, arg, "--output")) output = std.mem.eql(u8, args[i + 1], "source.%(ext)s");
     }
 
-    if (!bitrate or !thumbnail or !ffmpeg or !output or
-        !std.mem.startsWith(u8, args[args.len - 1], "ytsearch5:")) return error.InvalidArguments;
+    if (!bitrate or !thumbnail or !output or
+        !std.mem.startsWith(u8, args[args.len - 1], "scsearch10:")) return error.InvalidArguments;
 }
 
 /// Ожидает go или fail из управляющего файла; временный буфер освобождается на каждой итерации.

@@ -43,8 +43,6 @@ RUN --mount=type=cache,id=musica-zig-sources,target=/app/3rdparty,sharing=locked
     if [ -d /build-context/3rdparty ]; then cp -a /build-context/3rdparty/. /app/3rdparty/; fi \
     && python3 build.py -Doptimize=ReleaseSafe --summary all --verbose
 
-FROM node:22-bookworm-slim AS javascript
-
 FROM debian:bookworm-slim AS runtime
 ARG YTDLP_VERSION=2026.08.19
 RUN apt-get update \
@@ -52,8 +50,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -m venv /opt/yt-dlp \
     && /opt/yt-dlp/bin/pip install --no-cache-dir "yt-dlp[default]==${YTDLP_VERSION}" mutagen pillow
-COPY --from=javascript /usr/local/bin/node /usr/local/bin/node
-ENV PATH="/opt/yt-dlp/bin:${PATH}"
+# Writable home/cache for the unprivileged runtime user, including yt-dlp's client_id cache.
+RUN install -d -o 10001 -g 10001 /home/musica /home/musica/.cache
+ENV PATH="/opt/yt-dlp/bin:${PATH}" \
+    HOME=/home/musica \
+    XDG_CACHE_HOME=/home/musica/.cache
 
 WORKDIR /app
 COPY --from=build /app/zig-out/bin/musica-backend /usr/local/bin/musica-backend

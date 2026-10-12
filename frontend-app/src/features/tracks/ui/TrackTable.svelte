@@ -14,8 +14,6 @@
     play,
     menu,
     search,
-    writable,
-    upload,
     shareToken = null,
   }: {
     tracks: Track[];
@@ -26,8 +24,6 @@
     play: (track: Track) => void;
     menu: (track: Track, origin: HTMLElement, point?: { x: number; y: number }) => void;
     search: string;
-    writable: boolean;
-    upload: () => void;
     shareToken?: string | null;
   } = $props();
 </script>
@@ -103,11 +99,6 @@
       <p>
         {language.t(search ? 'search.tryAnother' : 'library.addMusic')}
       </p>
-      {#if !search && writable}<button
-          class="button primary desktop-only"
-          data-action="upload"
-          onclick={upload}>{language.t('uploads.title')}</button
-        >{/if}
     </div>
   {/each}
 </div>

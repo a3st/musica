@@ -9,7 +9,7 @@
   <br>
   <strong>Self-hosted · PWA · Svelte · Zig</strong>
   <br>
-  Version <strong>0.4.1</strong>
+  Version <strong>0.4.3</strong>
 </p>
 
 <p align="center">
@@ -44,7 +44,7 @@ themes; both interfaces are available in English and Russian.
 - **Search.** Search your accessible library first; when no matches are found,
   search shared service tracks and the iTunes and Deezer catalogs.
 - **Spotify import.** Select playlists and tracks from `Playlists.json` and
-  `YourLibrary.json`, download audio through yt-dlp, and prepare it for playback.
+  `YourLibrary.json`, download audio from SoundCloud through yt-dlp, and prepare it for playback.
 - **Accounts and administration.** Sign in, register when enabled, change your
   password, and delete your account. Administrators can manage users, view storage
   statistics, and remove unused shared tracks.
@@ -152,7 +152,7 @@ After building the nginx image, check its routes with
 | Player and profile | Node.js 22.12+ and npm |
 | Backend | Zig **0.16.0**, Python 3.10+, PostgreSQL 14+, and MinIO |
 | Audio processing | FFmpeg and ffprobe |
-| Audio downloads | yt-dlp and Node.js 22+ |
+| Audio downloads | yt-dlp |
 
 The backend Docker image already includes the audio processing and download tools.
 The HTTP server uses [http.zig](https://github.com/karlseguin/http.zig)

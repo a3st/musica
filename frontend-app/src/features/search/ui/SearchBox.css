@@ -177,10 +177,18 @@
   font-weight: 600;
 }
 
-.search-result-text > span,
-.search-result-add {
+.search-result-text > span {
   font-size: 11px;
   color: var(--accent);
+}
+
+.search-result-add {
+  color: var(--muted);
+}
+
+.search-result-add.added {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .search-result-action > svg {
